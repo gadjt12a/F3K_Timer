@@ -8,6 +8,14 @@
 
 #include "pin_config.h"
 
+// FreeFonts for better typography
+#include "fonts/FreeSansBold24pt7b.h"
+#include "fonts/FreeSansBold18pt7b.h"
+#include "fonts/FreeSans12pt7b.h"
+#include "fonts/FreeSans9pt7b.h"
+#include "fonts/FreeMonoBold24pt7b.h"
+#include "fonts/FreeMonoBold18pt7b.h"
+
 // ── Colour definitions (RGB565) ──────────────────────────────────────────────
 #define C565(r,g,b) (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3))
 
@@ -96,6 +104,7 @@ void UI::_drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t 
     _tft.setCursor(cx - (int16_t)(w / 2) - x1, cy - (int16_t)(h / 2) - y1);
     _tft.print(str);
 #else
+    _gfx->setFont(nullptr);
     _gfx->setTextSize(size);
     _gfx->setTextColor(color, COL_BG);
     _gfx->setTextWrap(false);
@@ -103,6 +112,21 @@ void UI::_drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t 
     _gfx->getTextBounds(str, 0, 0, &x1, &y1, &w, &h);
     _gfx->setCursor(cx - (int16_t)(w / 2) - x1, cy - (int16_t)(h / 2) - y1);
     _gfx->print(str);
+#endif
+}
+
+// Draw text with a FreeFont (waveshare only for now)
+void UI::_drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font) {
+#ifndef WOKWI_SIM
+    _gfx->setFont(font);
+    _gfx->setTextSize(1);
+    _gfx->setTextColor(color, COL_BG);
+    _gfx->setTextWrap(false);
+    int16_t x1, y1; uint16_t w, h;
+    _gfx->getTextBounds(str, 0, 0, &x1, &y1, &w, &h);
+    _gfx->setCursor(cx - (int16_t)(w / 2) - x1, cy - (int16_t)(h / 2) - y1);
+    _gfx->print(str);
+    _gfx->setFont(nullptr);  // Reset to default
 #endif
 }
 
@@ -605,11 +629,17 @@ void UI::_drawIdle() {
     _drawCentered("L = WT ONLY",      DISPLAY_CX, 218, COL_WHITE, 1);
     _drawCentered("R(hold) = SET",    DISPLAY_CX, 236, COL_GRAY, 1);
 #else
-    _drawCentered("F3K",              WS_CX, WS_Y_IDLE_TITLE, COL_WHITE, 7);
-    _drawCentered("TIMER",            WS_CX, WS_Y_IDLE_SUB,   COL_GRAY,  3);
-    _drawCentered("R = FLY + WT",     WS_CX, WS_Y_IDLE_HINT1, COL_WHITE, 2);
-    _drawCentered("L = WT ONLY",      WS_CX, WS_Y_IDLE_HINT2, COL_WHITE, 2);
-    _drawCentered("R(hold) = SET",    WS_CX, 375, COL_GRAY, 2);
+    // Subtle outer ring as decorative bezel
+    ws_fillRing(_gfx, WS_CX, WS_CY, 225, 218, COL_DIMGRAY);
+
+    // Main title with FreeFont
+    _drawFontCentered("F3K", WS_CX, 190, COL_WHITE, &FreeSansBold24pt7b);
+    _drawFontCentered("TIMER", WS_CX, 240, COL_GRAY, &FreeSansBold18pt7b);
+
+    // Hints with smaller font
+    _drawFontCentered("R = FLY + WT", WS_CX, 310, COL_WHITE, &FreeSans12pt7b);
+    _drawFontCentered("L = WT ONLY", WS_CX, 340, COL_WHITE, &FreeSans12pt7b);
+    _drawFontCentered("R(hold) = SET", WS_CX, 385, COL_DIMGRAY, &FreeSans9pt7b);
 #endif
 }
 
@@ -646,21 +676,21 @@ void UI::_drawRunningFull(bool flightActive,
     // Flight time (large) at top - primary focus for caller
     const char* flLabel = flightActive ? "FLIGHT"
                         : (ft.elapsed() > 0 ? "LAST" : "FLIGHT");
-    _drawCentered(flLabel, WS_CX, WS_Y_FL_LABEL, COL_GRAY, 2);
+    _drawFontCentered(flLabel, WS_CX, WS_Y_FL_LABEL, COL_GRAY, &FreeSans12pt7b);
 
     unsigned long el = ft.elapsed();
     uint16_t flCol = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
-    _drawCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, flCol, 6);
+    _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, flCol, &FreeMonoBold24pt7b);
 
     // State indicator (FLY/WAIT) in middle
-    _drawCentered(flightActive ? "FLY" : "WAIT", WS_CX, WS_Y_STATE,
-                  flightActive ? COL_GREEN : COL_GRAY, 3);
+    _drawFontCentered(flightActive ? "FLY" : "WAIT", WS_CX, WS_Y_STATE,
+                      flightActive ? COL_GREEN : COL_GRAY, &FreeSansBold18pt7b);
 
     // Flight log (3 best times) in middle
     _drawFlightLog(log);
 
     // Working time at bottom (smaller)
-    _drawCentered(fmtSec(rem, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, 4);
+    _drawFontCentered(fmtSec(rem, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, &FreeMonoBold18pt7b);
 #endif
 }
 
@@ -684,11 +714,11 @@ void UI::_updateRunningInc(bool flightActive,
     }
 #else
     // Update working time at bottom
-    _drawCentered(fmtSec(rem, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, 4);
+    _drawFontCentered(fmtSec(rem, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, &FreeMonoBold18pt7b);
     // Update flight time at top if active
     if (flightActive) {
-        _drawCentered(fmtMs(ft.elapsed(), buf, sizeof(buf)),
-                      WS_CX, WS_Y_FL_DIGITS, COL_GREEN, 6);
+        _drawFontCentered(fmtMs(ft.elapsed(), buf, sizeof(buf)),
+                          WS_CX, WS_Y_FL_DIGITS, COL_GREEN, &FreeMonoBold24pt7b);
     }
 #endif
 }
@@ -718,14 +748,14 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
     // Update flight label at top
     const char* flLabel = flightActive ? "FLIGHT"
                         : (ft.elapsed() > 0 ? "LAST" : "FLIGHT");
-    _gfx->fillRect(WS_CX - 80, WS_Y_FL_LABEL - 12, 160, 30, COL_BG);
-    _drawCentered(flLabel, WS_CX, WS_Y_FL_LABEL, COL_GRAY, 2);
+    _gfx->fillRect(WS_CX - 80, WS_Y_FL_LABEL - 20, 160, 40, COL_BG);
+    _drawFontCentered(flLabel, WS_CX, WS_Y_FL_LABEL, COL_GRAY, &FreeSans12pt7b);
 
     // Update flight time (large) at top
     unsigned long el = ft.elapsed();
     uint16_t col = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
     _gfx->fillRect(WS_CX - 120, WS_Y_FL_DIGITS - 35, 240, 70, COL_BG);
-    _drawCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, col, 6);
+    _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, col, &FreeMonoBold24pt7b);
 
     // Redraw flight log (new flight may have been recorded)
     _gfx->fillRect(WS_CX - 100, WS_Y_LOG_START - 10, 200, WS_Y_LOG_STEP * 3 + 20, COL_BG);
@@ -743,12 +773,12 @@ void UI::_drawExpired(const FlightLog& log) {
     _drawFlightLogExpired(log, 163, 5);
     _drawCentered("A = RESTART", DISPLAY_CX, 258, COL_GRAY, 1);
 #else
-    // TIME UP at top
-    _drawCentered("TIME", WS_CX, 80, COL_RED, 6);
-    _drawCentered("UP",   WS_CX, 140, COL_RED, 6);
+    // TIME UP at top with nice font
+    _drawFontCentered("TIME", WS_CX, 90, COL_RED, &FreeSansBold24pt7b);
+    _drawFontCentered("UP", WS_CX, 145, COL_RED, &FreeSansBold24pt7b);
     // All flight times below - includes scratched in red with strikethrough
     _drawFlightLogExpired(log, 200, 7);
-    _drawCentered("R = RESTART", WS_CX, 400, COL_GRAY, 2);
+    _drawFontCentered("R = RESTART", WS_CX, 400, COL_GRAY, &FreeSans12pt7b);
 #endif
 }
 
@@ -785,9 +815,9 @@ void UI::_drawSettings(int minutes) {
     _drawCentered("hold A = confirm", DISPLAY_CX, 272, COL_GRAY, 1);
     _drawCentered("(auto 8s)",        DISPLAY_CX, 288, COL_DIMGRAY, 1);
 #else
-    _drawCentered("SET WORKING TIME", WS_CX, 100, COL_GRAY, 2);
-    _drawCentered(buf,   WS_CX, WS_CY, COL_WHITE, 8);
-    _drawCentered("min", WS_CX, WS_CY + 70, COL_GRAY, 3);
+    _drawFontCentered("SET WORKING TIME", WS_CX, 100, COL_GRAY, &FreeSans12pt7b);
+    _drawFontCentered(buf, WS_CX, WS_CY, COL_WHITE, &FreeMonoBold24pt7b);
+    _drawFontCentered("min", WS_CX, WS_CY + 50, COL_GRAY, &FreeSansBold18pt7b);
 
     // Presets in a row
     const int presets[3] = {3, 5, 10};
@@ -796,11 +826,11 @@ void UI::_drawSettings(int minutes) {
     for (int i = 0; i < 3; i++) {
         int x = WS_CX + (i - 1) * spacing;
         uint16_t col = (minutes == presets[i]) ? COL_GREEN : COL_DIMGRAY;
-        _drawCentered(labels[i], x, WS_CY + 130, col, 3);
+        _drawFontCentered(labels[i], x, WS_CY + 110, col, &FreeSansBold18pt7b);
     }
 
-    _drawCentered("R = +1 min", WS_CX, WS_CY + 170, COL_WHITE, 2);
-    _drawCentered("L = -1 min", WS_CX, WS_CY + 195, COL_WHITE, 2);
+    _drawFontCentered("R = +1 min", WS_CX, WS_CY + 160, COL_WHITE, &FreeSans12pt7b);
+    _drawFontCentered("L = -1 min", WS_CX, WS_CY + 190, COL_WHITE, &FreeSans12pt7b);
 #endif
 }
 
@@ -820,16 +850,18 @@ void UI::_drawSettingsInc(int minutes) {
         _drawCentered(labels[i], xs[i], 185, col, 2);
     }
 #else
-    _gfx->fillRect(WS_CX - 80, WS_CY - 50, 160, 100, COL_BG);
-    _drawCentered(buf, WS_CX, WS_CY, COL_WHITE, 8);
+    _gfx->fillRect(WS_CX - 80, WS_CY - 30, 160, 60, COL_BG);
+    _drawFontCentered(buf, WS_CX, WS_CY, COL_WHITE, &FreeMonoBold24pt7b);
 
+    // Clear and redraw presets
+    _gfx->fillRect(WS_CX - 160, WS_CY + 85, 320, 50, COL_BG);
     const int presets[3] = {3, 5, 10};
     const char* labels[3] = {"3", "5", "10"};
     int spacing = 100;
     for (int i = 0; i < 3; i++) {
         int x = WS_CX + (i - 1) * spacing;
         uint16_t col = (minutes == presets[i]) ? COL_GREEN : COL_DIMGRAY;
-        _drawCentered(labels[i], x, WS_CY + 130, col, 3);
+        _drawFontCentered(labels[i], x, WS_CY + 110, col, &FreeSansBold18pt7b);
     }
 #endif
 }

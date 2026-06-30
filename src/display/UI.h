@@ -66,6 +66,9 @@ private:
                                int startY,
                                int maxShown);
     void _drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t size);
+#ifndef WOKWI_SIM
+    void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font);
+#endif
     void _updateArc(int remaining, int total);
     void _drawArc(int remaining, int total, uint16_t color);
     void _drawArcSegment(float startDeg, float endDeg, uint16_t color);
