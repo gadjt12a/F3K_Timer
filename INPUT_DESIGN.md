@@ -8,7 +8,7 @@ for all input on the Waveshare ESP32-S3-Touch-AMOLED-1.75C.
 
 ## Hardware Context
 
-The device is worn on the wrist or held in the palm by a timekeeper standing
+The device is held in the palm by a timekeeper standing
 on the field watching aircraft. One hand holds the device; the other may be
 free. Eyes are on the sky, not the screen. Input must be:
 - Operable by feel / muscle memory
