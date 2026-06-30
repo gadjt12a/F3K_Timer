@@ -41,13 +41,15 @@ static bool _needsRender(AppState state, int wtSecs) {
 }
 
 static void _doRender(AppState state, int wtSecs) {
-    g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes);
+    int battPct = g_btns.getBatteryPercent();
+    bool charging = g_btns.isCharging();
+    g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes, battPct, charging);
     _lastState     = state;
     _lastWtSecs    = wtSecs;
     _lastWtMinutes = g_wtMinutes;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
-    _nextFlashMs   = now + ARC_FLASH_INTERVAL_MS;
+    _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

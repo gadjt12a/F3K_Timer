@@ -18,6 +18,10 @@ public:
     bool btnAVeryLong()  const;   // 2000ms hold (for abort)
     bool btnBVeryLong()  const;   // 2000ms hold (for abort)
 
+    // Battery info (hardware only — returns defaults on Wokwi)
+    int  getBatteryPercent();  // 0-100
+    bool isCharging();
+
 private:
 #ifdef WAVESHARE_HW
     XPowersAXP2101 _pmu;

@@ -236,45 +236,69 @@ void UI::_eraseArcSlice(float startDeg, float endDeg) {
 #endif
 
 void UI::_updateArc(int remaining, int total) {
-    static bool wasInFlashMode = false;
+    static bool wasInSweepMode = false;
 
     if (remaining <= ARC_RED_THRESHOLD && remaining > 0) {
-        // Last 10 seconds: FULL CIRCLE flashing red, synced with seconds countdown
-        // Flash ON for odd seconds (9,7,5,3,1), OFF for even seconds (10,8,6,4,2,0)
-        // Check if we just entered flash mode - clear any partial arc first
-        if (!wasInFlashMode) {
-            // First frame of flash mode - use radial erase to clear all arc pixels
+        // Last 10 seconds: sweeping red arc that refills each second
+        // Arc starts full at beginning of each second, sweeps CCW (erases) over 1 second
+        unsigned long now = millis();
+
+        if (!wasInSweepMode) {
+            // First frame of sweep mode - clear any partial arc and draw full red ring
 #ifdef WOKWI_SIM
             _drawArcSegment(0, 360, COL_BG);
+            _drawArcSegment(0, 360, COL_ARC_RED);
 #else
             ws_eraseRingRadial(_gfx, WS_CX, WS_CY, ARC_OUTER_RADIUS, ARC_INNER_RADIUS);
+            ws_fillRing(_gfx, WS_CX, WS_CY, ARC_OUTER_RADIUS, ARC_INNER_RADIUS, COL_ARC_RED);
 #endif
-            wasInFlashMode = true;
-            _prevFlashSecs = -1;  // Force redraw on first frame
+            wasInSweepMode = true;
+            _prevFlashSecs = remaining;
+            _lastArcSweepMs = now;
         }
 
-        // Flash based on seconds: ON for odd, OFF for even
-        bool vis = (remaining % 2) == 1;
+        // When second changes, refill the arc
         if (remaining != _prevFlashSecs) {
             _prevFlashSecs = remaining;
-            if (vis) {
-                // Draw FULL circle (360 degrees) in red
+            _lastArcSweepMs = now;
+            // Draw full red ring at start of each second
 #ifdef WOKWI_SIM
-                _drawArcSegment(0, 360, COL_ARC_RED);
+            _drawArcSegment(0, 360, COL_ARC_RED);
 #else
-                ws_fillRing(_gfx, WS_CX, WS_CY, ARC_OUTER_RADIUS, ARC_INNER_RADIUS, COL_ARC_RED);
+            ws_fillRing(_gfx, WS_CX, WS_CY, ARC_OUTER_RADIUS, ARC_INNER_RADIUS, COL_ARC_RED);
 #endif
-            } else {
-#ifdef WOKWI_SIM
-                _drawArcSegment(0, 360, COL_BG);
-#else
-                ws_eraseRingRadial(_gfx, WS_CX, WS_CY, ARC_OUTER_RADIUS, ARC_INNER_RADIUS);
-#endif
-            }
-            _arcVisible = vis;
         }
+
+        // Calculate how much of the second has elapsed (0.0 to 1.0)
+        unsigned long elapsedMs = now - _lastArcSweepMs;
+        if (elapsedMs > 1000) elapsedMs = 1000;
+        float progress = (float)elapsedMs / 1000.0f;
+
+        // Erase the portion that has "passed" - sweep anticlockwise from 12 o'clock
+        // progress=0 means full arc, progress=1 means arc fully erased
+        // Erase from (360 - eraseDeg) to 360 so it sweeps anticlockwise
+        float eraseDeg = progress * 360.0f;
+        if (eraseDeg > 1.0f) {
+            float eraseStart = 360.0f - eraseDeg;
+#ifdef WOKWI_SIM
+            for (float a = eraseStart; a < 360.0f; a += 0.5f) {
+                float rad = a * (float)M_PI / 180.0f;
+                float s = sinf(rad);
+                float c = cosf(rad);
+                _tft.drawLine(
+                    DISPLAY_CX + (int)(ARC_INNER_RADIUS * s),
+                    DISPLAY_CY - (int)(ARC_INNER_RADIUS * c),
+                    DISPLAY_CX + (int)(ARC_OUTER_RADIUS * s),
+                    DISPLAY_CY - (int)(ARC_OUTER_RADIUS * c),
+                    COL_BG);
+            }
+#else
+            _eraseArcSlice(eraseStart, 360.0f);
+#endif
+        }
+        _arcVisible = true;
     } else if (remaining == 0) {
-        wasInFlashMode = false;  // Reset for next round
+        wasInSweepMode = false;  // Reset for next round
         if (_arcVisible) {
 #ifdef WOKWI_SIM
             _drawArc(1, total, COL_BG);
@@ -284,7 +308,7 @@ void UI::_updateArc(int remaining, int total) {
             _arcVisible = false;
         }
     } else {
-        wasInFlashMode = false;  // Reset if we're back above 10s
+        wasInSweepMode = false;  // Reset if we're back above 10s
         // Normal countdown - erase consumed slice and handle color transitions
         if (_prevWtSecs > remaining) {
             // Calculate degrees: remaining time = sweepDeg from 12 o'clock
@@ -411,7 +435,9 @@ void UI::render(AppState state,
                 const FlightTimer& ft,
                 const FlightLog&   log,
                 unsigned long      scratchStartMs,
-                int                wtMinutes)
+                int                wtMinutes,
+                int                batteryPct,
+                bool               isCharging)
 {
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
@@ -428,7 +454,14 @@ void UI::render(AppState state,
 
     switch (state) {
         case STATE_IDLE:
-            if (screenChanged) _drawIdle();
+            if (screenChanged) {
+                _drawIdle();
+                if (batteryPct >= 0) _drawBattery(batteryPct, isCharging);
+                _prevBatteryPct = batteryPct;
+            } else if (batteryPct >= 0 && batteryPct != _prevBatteryPct) {
+                _drawBattery(batteryPct, isCharging);
+                _prevBatteryPct = batteryPct;
+            }
             break;
 
         case STATE_WORKING_TIME_RUNNING:
@@ -490,6 +523,75 @@ void UI::render(AppState state,
 #ifndef WOKWI_SIM
     // Push canvas framebuffer to display
     _gfx->flush();
+#endif
+}
+
+// ── Battery indicator ─────────────────────────────────────────────────────────
+
+void UI::_drawBattery(int pct, bool charging) {
+#ifndef WOKWI_SIM
+    // Classic battery icon at top center (near 12 o'clock)
+    // Horizontal battery shape with terminal nub on right
+    const int BODY_W = 40;    // Main body width
+    const int BODY_H = 18;    // Main body height
+    const int TERM_W = 4;     // Terminal nub width
+    const int TERM_H = 8;     // Terminal nub height
+    const int BORDER = 2;     // Border thickness
+    const int INNER_PAD = 2;  // Padding inside border
+
+    const int BODY_X = WS_CX - (BODY_W + TERM_W) / 2;
+    const int BODY_Y = 45;
+
+    // Clear area
+    _gfx->fillRect(BODY_X - 2, BODY_Y - 2, BODY_W + TERM_W + 4, BODY_H + 4, COL_BG);
+
+    // Battery body outline (rounded corners simulated with filled rects)
+    // Outer border
+    _gfx->fillRoundRect(BODY_X, BODY_Y, BODY_W, BODY_H, 3, COL_WHITE);
+    // Inner cutout (black)
+    _gfx->fillRoundRect(BODY_X + BORDER, BODY_Y + BORDER,
+                        BODY_W - BORDER * 2, BODY_H - BORDER * 2, 2, COL_BG);
+
+    // Terminal nub on right side
+    int termX = BODY_X + BODY_W;
+    int termY = BODY_Y + (BODY_H - TERM_H) / 2;
+    _gfx->fillRoundRect(termX, termY, TERM_W + 2, TERM_H, 2, COL_WHITE);
+
+    // Fill area dimensions (inside the border)
+    int fillAreaX = BODY_X + BORDER + INNER_PAD;
+    int fillAreaY = BODY_Y + BORDER + INNER_PAD;
+    int fillAreaW = BODY_W - BORDER * 2 - INNER_PAD * 2;
+    int fillAreaH = BODY_H - BORDER * 2 - INNER_PAD * 2;
+
+    // Calculate fill width based on percentage
+    int fillW = (pct * fillAreaW) / 100;
+    if (fillW < 0) fillW = 0;
+    if (fillW > fillAreaW) fillW = fillAreaW;
+
+    // Fill color based on level
+    uint16_t fillCol;
+    if (pct <= 15) {
+        fillCol = COL_RED;
+    } else if (pct <= 30) {
+        fillCol = COL_ORANGE;
+    } else {
+        fillCol = COL_GREEN;
+    }
+
+    // Draw fill from left
+    if (fillW > 0) {
+        _gfx->fillRect(fillAreaX, fillAreaY, fillW, fillAreaH, fillCol);
+    }
+
+    // Charging indicator: lightning bolt symbol overlaid
+    if (charging) {
+        // Simple lightning bolt in center of battery
+        int boltX = BODY_X + BODY_W / 2;
+        int boltY = BODY_Y + BODY_H / 2;
+        // Draw a small yellow lightning bolt shape
+        _gfx->fillTriangle(boltX - 2, boltY - 5, boltX + 4, boltY - 5, boltX, boltY + 1, COL_YELLOW);
+        _gfx->fillTriangle(boltX - 4, boltY - 1, boltX + 2, boltY - 1, boltX - 2, boltY + 5, COL_YELLOW);
+    }
 #endif
 }
 

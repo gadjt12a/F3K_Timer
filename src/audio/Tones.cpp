@@ -413,13 +413,9 @@ void Tones::playAlert(int t) {
     switch (t) {
         case 30:
         case 20:
-        case 10: case 9: case 8: case 7: case 6: case 5: case 4: case 3: case 2: case 1:
-            // Single beep - same tone for all countdown alerts
-            _queueTone(880, 300);
-            break;
         case 15:
-            // Double beep at 15s
-            _queueTone(880, 300);
+        case 10: case 9: case 8: case 7: case 6: case 5: case 4: case 3: case 2: case 1:
+            // Single beep for all countdown alerts
             _queueTone(880, 300);
             break;
         case 0:

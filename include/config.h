@@ -14,7 +14,7 @@ static const int ALERT_COUNT   = 14;
 #define ARC_GREEN_THRESHOLD     60
 #define ARC_ORANGE_THRESHOLD    30
 #define ARC_RED_THRESHOLD       10
-#define ARC_FLASH_INTERVAL_MS  250
+#define ARC_SWEEP_INTERVAL_MS   50   // Sub-second arc sweep update rate
 
 // ── Button timings (ms) ───────────────────────────────────────────────────────
 #define LONG_PRESS_MS          800

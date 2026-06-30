@@ -24,7 +24,9 @@ public:
                 const FlightTimer& ft,
                 const FlightLog&   log,
                 unsigned long      scratchStartMs = 0,
-                int                wtMinutes      = 10);
+                int                wtMinutes      = 10,
+                int                batteryPct     = -1,
+                bool               isCharging     = false);
 
 private:
 #ifdef WOKWI_SIM
@@ -39,6 +41,8 @@ private:
     int      _prevWtSecs   = -1;
     int      _prevFlashSecs = -1;
     bool     _arcVisible   = true;
+    unsigned long _lastArcSweepMs = 0;  // For sub-second arc sweep animation
+    int      _prevBatteryPct = -1;      // Track battery changes
 
     void _drawRunningFull(bool flightActive,
                           const WorkingTime& wt,
@@ -70,6 +74,7 @@ private:
     void _eraseArcSlice(float startDeg, float endDeg);
 #endif
     void _clearScreen();
+    void _drawBattery(int pct, bool charging);
 
     static char* fmtSec(int seconds, char* buf, size_t len);
     static char* fmtMs(unsigned long ms, char* buf, size_t len);

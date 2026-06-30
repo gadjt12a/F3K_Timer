@@ -140,3 +140,19 @@ bool Buttons::btnAHeld()     const { return _holdA; }
 bool Buttons::btnBHeld()     const { return _holdB; }
 bool Buttons::btnAVeryLong() const { return _veryLongA; }
 bool Buttons::btnBVeryLong() const { return _veryLongB; }
+
+int Buttons::getBatteryPercent() {
+#ifdef WAVESHARE_HW
+    return _pmu.getBatteryPercent();
+#else
+    return 75;  // Stub value for simulation
+#endif
+}
+
+bool Buttons::isCharging() {
+#ifdef WAVESHARE_HW
+    return _pmu.isCharging();
+#else
+    return false;  // Stub for simulation
+#endif
+}
