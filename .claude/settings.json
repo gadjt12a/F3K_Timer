@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"d:\\\\VS_Code_Projects\\\\F3K_Timer_Project_2\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e wokwi 2>&1 | Select-Object -Last 15)",
+      "PowerShell(cd \"d:\\\\VS_Code_Projects\\\\F3K_Timer_Project_2\"; & \"$env:USERPROFILE\\\\.platformio\\\\penv\\\\Scripts\\\\pio.exe\" run -e wokwi 2>&1 | Select-Object -Last 20)",
+      "WebFetch(domain:www.waveshare.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

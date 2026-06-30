@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "author": "F3K Timer Project",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 9.6,
+      "left": -158.36,
+      "attrs": {}
+    },
+    {
+      "type": "board-ili9341-cap-touch",
+      "id": "lcd1",
+      "top": -28.04,
+      "left": 47.62,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn_a",
+      "top": -166.6,
+      "left": -172.8,
+      "attrs": { "color": "green", "label": "A (G16)" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn_b",
+      "top": -166.6,
+      "left": 19.2,
+      "attrs": { "color": "blue", "label": "B (G17)" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer1",
+      "top": -166.6,
+      "left": -280,
+      "attrs": { "volume": "0.1" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX",   "$serialMonitor:RX", "", [] ],
+    [ "esp:RX",   "$serialMonitor:TX", "", [] ],
+
+    [ "lcd1:VCC",  "esp:3V3.1",   "red",   [ "v19.2", "h-249.6", "v-240" ] ],
+    [ "lcd1:GND",  "esp:GND.1", "black", [ "v48",   "h-288",   "v-144" ] ],
+    [ "lcd1:LED",  "esp:3V3.1",   "red",   [ "v28.8", "h-336",   "v-249.6" ] ],
+
+    [ "lcd1:CS",   "esp:5",  "green", [ "v67.2",  "h-134.4", "v-201.6" ] ],
+    [ "lcd1:RST",  "esp:4",  "green", [ "v57.6",  "h-153.6", "v-163.2" ] ],
+    [ "lcd1:D/C",  "esp:2",  "green", [ "v38.4",  "h-172.8", "v-124.8" ] ],
+    [ "lcd1:MOSI", "esp:20", "green", [ "v76.8",  "h-153.6", "v-288"   ] ],
+    [ "lcd1:SCK",  "esp:18", "green", [ "v86.4",  "h-153.6", "v-230.4" ] ],
+    [ "lcd1:MISO", "esp:19", "green", [ "v96",    "h-163.2", "v-249.6" ] ],
+    [ "lcd1:SCL",  "esp:47", "green", [ "v105.6", "h-163.2", "v-307.2" ] ],
+    [ "lcd1:SDA",  "esp:21", "green", [ "v115.2", "h-163.2", "v-288"   ] ],
+
+    [ "btn_a:1.l", "esp:16",    "green", [ "h-30", "v60",  "h155", "v-280" ] ],
+    [ "btn_a:2.l", "esp:GND.2", "black", [ "h-14", "v60",  "h150", "v-280" ] ],
+    [ "btn_b:1.l", "esp:17",    "green", [ "h-25", "v160", "h35",  "v-280" ] ],
+    [ "btn_b:2.l", "esp:GND.2", "black", [ "h-15", "v160", "v-280"         ] ],
+
+    [ "buzzer1:1", "esp:13",    "orange", [ "h20", "v200", "h100", "v-320" ] ],
+    [ "buzzer1:2", "esp:GND.2", "black",  [ "h30", "v210", "h110", "v-330" ] ]
+  ],
+  "dependencies": {}
+}
