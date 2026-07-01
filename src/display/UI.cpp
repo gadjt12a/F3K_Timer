@@ -764,18 +764,16 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
 
 void UI::_drawExpired(const FlightLog& log) {
 #ifdef WOKWI_SIM
-    _drawCentered("TIME", DISPLAY_CX,  95, COL_RED, 4);
-    _drawCentered("UP",   DISPLAY_CX, 128, COL_RED, 4);
-    _tft.drawFastHLine(DISPLAY_CX - DIV_HALF, 150, DIV_HALF * 2, COL_DIMGRAY);
-    _drawFlightLogExpired(log, 163, 5);
+    _drawCentered("TIME UP", DISPLAY_CX, 95, COL_RED, 3);
+    _tft.drawFastHLine(DISPLAY_CX - DIV_HALF, 115, DIV_HALF * 2, COL_DIMGRAY);
+    _drawFlightLogExpired(log, 130, 6);
     _drawCentered("A = RESTART", DISPLAY_CX, 258, COL_GRAY, 1);
 #else
-    // TIME UP at top with nice font
-    _drawFontCentered("TIME", WS_CX, 90, COL_RED, &FreeSansBold24pt7b);
-    _drawFontCentered("UP", WS_CX, 145, COL_RED, &FreeSansBold24pt7b);
+    // TIME UP on one line at top
+    _drawFontCentered("TIME UP", WS_CX, 80, COL_RED, &FreeSansBold18pt7b);
     // All flight times below - includes scratched in red with strikethrough
-    _drawFlightLogExpired(log, 200, 7);
-    _drawFontCentered("R = RESTART", WS_CX, 400, COL_GRAY, &FreeSans12pt7b);
+    _drawFlightLogExpired(log, 130, 8);
+    _drawFontCentered("R = RESTART", WS_CX, 420, COL_GRAY, &FreeSans12pt7b);
 #endif
 }
 
@@ -877,7 +875,8 @@ void UI::_drawFlightLog(const FlightLog& log, int startY, int maxShown) {
     int total = log.count();
     int best  = log.bestIndex();
 
-    int  selected[MAX_FLIGHTS];
+    // Find top 3 best times (longest valid flights), keep in rank order (best first)
+    int  selected[3];
     bool used[MAX_FLIGHTS];
     for (int i = 0; i < MAX_FLIGHTS; i++) used[i] = false;
     int selCount = 0;
@@ -896,56 +895,89 @@ void UI::_drawFlightLog(const FlightLog& log, int startY, int maxShown) {
         used[topIdx] = true;
     }
 
-    for (int i = 0; i < selCount - 1; i++)
-        for (int j = i + 1; j < selCount; j++)
-            if (selected[j] < selected[i]) {
-                int tmp = selected[i]; selected[i] = selected[j]; selected[j] = tmp;
-            }
-
+    // Display in rank order (best first) with flight number
+    // Traffic light: 1st=green, 2nd=orange, 3rd=yellow
     for (int slot = 0; slot < selCount; slot++) {
-        int    i = selected[slot];
-        Flight f = log.get(i);
+        int    flightIdx = selected[slot];
+        Flight f = log.get(flightIdx);
         int    y = startY + slot * step;
 
         char timeBuf[16]; fmtMs(f.durationMs, timeBuf, sizeof(timeBuf));
         char row[32];
-        snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, (i == best) ? " *" : "");
+        snprintf(row, sizeof(row), "%d. %s", flightIdx + 1, timeBuf);
 
-        uint16_t col = (i == best) ? COL_YELLOW : COL_WHITE;
+        uint16_t col;
+        if (slot == 0)      col = COL_GREEN;
+        else if (slot == 1) col = COL_ORANGE;
+        else                col = COL_YELLOW;
 #ifdef WOKWI_SIM
         _drawCentered(row, DISPLAY_CX, y, col, 1);
 #else
-        _drawCentered(row, WS_CX, y, col, 3);  // Larger text size for readability
+        _drawCentered(row, WS_CX, y, col, 3);
 #endif
     }
 }
 
 // Flight log for expired screen - shows ALL flights including scratched ones
+// Top 3 valid flights are marked with asterisk and yellow text
 void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
 #ifdef WOKWI_SIM
     int step = Y_LOG_STEP;
 #else
-    int step = 28;  // Slightly tighter spacing for more flights
+    int step = 38;  // Spacing for FreeMonoBold18pt font
 #endif
 
     int total = log.count();
-    int best  = log.bestIndex();
-    int shown = 0;
 
+    // Find top 3 best (longest) valid flights
+    int top3[3] = {-1, -1, -1};
+    for (int pick = 0; pick < 3; pick++) {
+        int bestIdx = -1;
+        unsigned long bestMs = 0;
+        for (int i = 0; i < total; i++) {
+            Flight f = log.get(i);
+            if (f.scratched || f.durationMs == 0) continue;
+            // Skip if already selected
+            bool alreadyPicked = false;
+            for (int p = 0; p < pick; p++) {
+                if (top3[p] == i) { alreadyPicked = true; break; }
+            }
+            if (alreadyPicked) continue;
+            if (f.durationMs > bestMs) {
+                bestMs = f.durationMs;
+                bestIdx = i;
+            }
+        }
+        top3[pick] = bestIdx;
+    }
+
+    int shown = 0;
     for (int i = 0; i < total && shown < maxShown; i++) {
         Flight f = log.get(i);
         if (f.durationMs == 0) continue;
 
+        // Check if this flight is in top 3 and which rank
+        int rank = -1;  // 0=best, 1=2nd, 2=3rd
+        if (!f.scratched) {
+            for (int p = 0; p < 3; p++) {
+                if (top3[p] == i) { rank = p; break; }
+            }
+        }
+
         int y = startY + shown * step;
         char timeBuf[16]; fmtMs(f.durationMs, timeBuf, sizeof(timeBuf));
         char row[32];
-        snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, (i == best && !f.scratched) ? " *" : "");
+        snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, (rank >= 0) ? " *" : "");
 
         uint16_t col;
         if (f.scratched) {
             col = COL_RED;
-        } else if (i == best) {
-            col = COL_YELLOW;
+        } else if (rank == 0) {
+            col = COL_GREEN;   // 1st best
+        } else if (rank == 1) {
+            col = COL_ORANGE;  // 2nd best
+        } else if (rank == 2) {
+            col = COL_YELLOW;  // 3rd best
         } else {
             col = COL_WHITE;
         }
@@ -960,14 +992,16 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
             _tft.drawFastHLine(DISPLAY_CX - w/2 - 2, lineY, w + 4, COL_RED);
         }
 #else
-        _drawCentered(row, WS_CX, y, col, 2);
+        _drawFontCentered(row, WS_CX, y, col, &FreeMonoBold18pt7b);
         if (f.scratched) {
             // Draw strikethrough line
             int16_t x1, y1; uint16_t w, h;
-            _gfx->setTextSize(2);
+            _gfx->setFont(&FreeMonoBold18pt7b);
+            _gfx->setTextSize(1);
             _gfx->getTextBounds(row, 0, 0, &x1, &y1, &w, &h);
             int lineY = y;
             _gfx->fillRect(WS_CX - w/2 - 4, lineY - 1, w + 8, 3, COL_RED);
+            _gfx->setFont(nullptr);
         }
 #endif
         shown++;
