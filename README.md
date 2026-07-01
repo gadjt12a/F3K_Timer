@@ -5,10 +5,16 @@ A hand-held F3K (discus-launched glider) competition timer for a **caller** — 
 ## Features
 
 - Working time countdown with visual arc indicator
-- Flight timer (start/stop with button A)
-- Flight log showing best times
+- All times displayed with hundredths of a second (MM:SS.CC)
+- Flight timer (start/stop with button)
+- Flight log showing top 3 best times with traffic light colors:
+  - 1st best = Green
+  - 2nd best = Orange
+  - 3rd best = Yellow
+  - Scratched = Red (strikethrough)
 - Audio alerts at key time thresholds (30s, 15s, 10-1s countdown)
 - Configurable working time (1-15 minutes)
+- Battery indicator
 
 ## Hardware
 
@@ -46,14 +52,23 @@ You can run this project in simulation without the physical hardware.
 
 | Button | Color | Action |
 |--------|-------|--------|
-| A (GPIO16) | Green | Start/stop flight, confirm |
-| B (GPIO17) | Blue | Scratch flight, settings adjust |
+| R (GPIO17) | Blue | Primary: Start/stop flight |
+| L (GPIO16) | Green | Secondary: Scratch, WT only start |
 
-- **Short press A** from idle: Start working time + flight
-- **Hold A** from idle: Enter settings
-- **Short press A** during flight: Stop and record flight
-- **Short press B** during working time: Scratch last flight
-- **Hold B**: Abort round
+**From Idle:**
+- **R click**: Start working time + flight together
+- **L click**: Start working time only (wait for launch)
+- **R hold**: Enter settings
+
+**During Round:**
+- **R click**: Start/stop flight
+- **L click**: Scratch last recorded flight
+- **R very long hold (2s)**: Abort round
+
+**Settings:**
+- **R click**: +1 minute
+- **L click**: -1 minute
+- **R hold** or timeout: Confirm and exit
 
 ## Building for Hardware
 
