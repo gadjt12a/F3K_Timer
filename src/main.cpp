@@ -28,13 +28,15 @@ static int           _lastWtSecs     = -1;
 static int           _lastWtMinutes  = -1;
 static unsigned long _nextScratchMs  = 0;
 static unsigned long _nextFlashMs    = 0;
+static unsigned long _nextTimeMs     = 0;
 
 static bool _needsRender(AppState state, int wtSecs) {
     if (state != _lastState) return true;
     if (state == STATE_SCRATCH_CONFIRM)   return millis() >= _nextScratchMs;
     if (state == STATE_SETTINGS)          return g_wtMinutes != _lastWtMinutes;
     if (state == STATE_WORKING_TIME_RUNNING || state == STATE_FLIGHT_RUNNING) {
-        if (wtSecs != _lastWtSecs) return true;
+        // Update every 50ms for hundredths display
+        if (millis() >= _nextTimeMs) return true;
         if (wtSecs <= ARC_RED_THRESHOLD && wtSecs > 0) return millis() >= _nextFlashMs;
     }
     return false;
@@ -50,6 +52,7 @@ static void _doRender(AppState state, int wtSecs) {
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
+    _nextTimeMs    = now + 10;  // 100 FPS target for smooth hundredths
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

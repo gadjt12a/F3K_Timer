@@ -79,6 +79,5 @@ private:
     void _clearScreen();
     void _drawBattery(int pct, bool charging);
 
-    static char* fmtSec(int seconds, char* buf, size_t len);
     static char* fmtMs(unsigned long ms, char* buf, size_t len);
 };

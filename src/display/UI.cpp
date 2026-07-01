@@ -71,15 +71,10 @@ static const int WS_Y_IDLE_HINT2 = 340;
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-char* UI::fmtSec(int s, char* buf, size_t len) {
-    if (s < 0) s = 0;
-    snprintf(buf, len, "%02d:%02d", s / 60, s % 60);
-    return buf;
-}
-
 char* UI::fmtMs(unsigned long ms, char* buf, size_t len) {
-    unsigned long s = ms / 1000;
-    snprintf(buf, len, "%02lu:%02lu", s / 60, s % 60);
+    unsigned long totalSec = ms / 1000;
+    unsigned long hundredths = (ms % 1000) / 10;
+    snprintf(buf, len, "%02lu:%02lu.%02lu", totalSec / 60, totalSec % 60, hundredths);
     return buf;
 }
 
@@ -490,22 +485,22 @@ void UI::render(AppState state,
 
         case STATE_WORKING_TIME_RUNNING:
         case STATE_FLIGHT_RUNNING: {
-            bool fa  = (state == STATE_FLIGHT_RUNNING);
-            int  rem = wt.getRemaining();
+            bool fa   = (state == STATE_FLIGHT_RUNNING);
+            int  remS = wt.getRemaining();
             if (screenChanged) _drawRunningFull(fa, wt, ft, log);
             else if (stateChanged) _updateFlightStateOnly(fa, ft, log);  // update flight label/time/log
             else                   _updateRunningInc(fa, wt, ft);
-            _prevWtSecs = rem;
+            _prevWtSecs = remS;
             break;
         }
 
         case STATE_SCRATCH_CONFIRM: {
-            int rem = wt.getRemaining();
+            int remS = wt.getRemaining();
             if (screenChanged) {
-                _drawArc(rem, wt.getTotal(), _arcColor(rem));
+                _drawArc(remS, wt.getTotal(), _arcColor(remS));
                 _drawFlightLog(log);
             } else {
-                _updateArc(rem, wt.getTotal());
+                _updateArc(remS, wt.getTotal());
             }
 #ifdef WOKWI_SIM
             _tft.fillRoundRect(DISPLAY_CX - 70, 88, 140, 62, 6, C565(0x11, 0x11, 0x11));
@@ -530,7 +525,7 @@ void UI::render(AppState state,
                 _gfx->fillRect(WS_CX - 80, WS_CY + 50, barW, 8, COL_RED);
             }
 #endif
-            _prevWtSecs = rem;
+            _prevWtSecs = remS;
             break;
         }
 
@@ -650,11 +645,12 @@ void UI::_drawRunningFull(bool flightActive,
                           const FlightTimer& ft,
                           const FlightLog&   log)
 {
-    int rem = wt.getRemaining();
-    _drawArc(rem, wt.getTotal(), _arcColor(rem));
+    int remS = wt.getRemaining();
+    unsigned long remMs = wt.getRemainingMs();
+    _drawArc(remS, wt.getTotal(), _arcColor(remS));
 
-    char buf[12];
-    uint16_t col = (rem <= ARC_RED_THRESHOLD) ? COL_RED : COL_WHITE;
+    char buf[16];
+    uint16_t col = (remS <= ARC_RED_THRESHOLD) ? COL_RED : COL_WHITE;
 
 #ifdef WOKWI_SIM
     _drawCentered("WORKING TIME", DISPLAY_CX, Y_WT_LABEL, COL_GRAY, 1);
@@ -665,11 +661,11 @@ void UI::_drawRunningFull(bool flightActive,
     _drawCentered(flLabel, DISPLAY_CX, Y_FL_LABEL, COL_GRAY, 1);
     _tft.drawFastHLine(DISPLAY_CX - DIV_HALF, Y_DIV2, DIV_HALF * 2, COL_DIMGRAY);
 
-    _drawCentered(fmtSec(rem, buf, sizeof(buf)), DISPLAY_CX, Y_WT_DIGITS, col, 4);
+    _drawCentered(fmtMs(remMs, buf, sizeof(buf)), DISPLAY_CX, Y_WT_DIGITS, col, 3);
 
     unsigned long el = ft.elapsed();
     col = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
-    _drawCentered(fmtMs(el, buf, sizeof(buf)), DISPLAY_CX, Y_FL_DIGITS, col, 3);
+    _drawCentered(fmtMs(el, buf, sizeof(buf)), DISPLAY_CX, Y_FL_DIGITS, col, 2);
 
     _drawFlightLog(log);
 #else
@@ -690,7 +686,7 @@ void UI::_drawRunningFull(bool flightActive,
     _drawFlightLog(log);
 
     // Working time at bottom (smaller)
-    _drawFontCentered(fmtSec(rem, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, &FreeMonoBold18pt7b);
+    _drawFontCentered(fmtMs(remMs, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, &FreeMonoBold18pt7b);
 #endif
 }
 
@@ -700,21 +696,22 @@ void UI::_updateRunningInc(bool flightActive,
                            const WorkingTime& wt,
                            const FlightTimer& ft)
 {
-    int rem = wt.getRemaining();
-    _updateArc(rem, wt.getTotal());
+    int remS = wt.getRemaining();
+    unsigned long remMs = wt.getRemainingMs();
+    _updateArc(remS, wt.getTotal());
 
-    char buf[12];
-    uint16_t col = (rem <= ARC_RED_THRESHOLD) ? COL_RED : COL_WHITE;
+    char buf[16];
+    uint16_t col = (remS <= ARC_RED_THRESHOLD) ? COL_RED : COL_WHITE;
 
 #ifdef WOKWI_SIM
-    _drawCentered(fmtSec(rem, buf, sizeof(buf)), DISPLAY_CX, Y_WT_DIGITS, col, 4);
+    _drawCentered(fmtMs(remMs, buf, sizeof(buf)), DISPLAY_CX, Y_WT_DIGITS, col, 3);
     if (flightActive) {
         _drawCentered(fmtMs(ft.elapsed(), buf, sizeof(buf)),
-                      DISPLAY_CX, Y_FL_DIGITS, COL_GREEN, 3);
+                      DISPLAY_CX, Y_FL_DIGITS, COL_GREEN, 2);
     }
 #else
     // Update working time at bottom
-    _drawFontCentered(fmtSec(rem, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, &FreeMonoBold18pt7b);
+    _drawFontCentered(fmtMs(remMs, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, &FreeMonoBold18pt7b);
     // Update flight time at top if active
     if (flightActive) {
         _drawFontCentered(fmtMs(ft.elapsed(), buf, sizeof(buf)),
@@ -726,7 +723,7 @@ void UI::_updateRunningInc(bool flightActive,
 // ── Running — flight state change only (no arc reset) ─────────────────────────
 
 void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const FlightLog& log) {
-    char buf[12];
+    char buf[16];
 
 #ifdef WOKWI_SIM
     // Update flight label
@@ -910,7 +907,7 @@ void UI::_drawFlightLog(const FlightLog& log, int startY, int maxShown) {
         Flight f = log.get(i);
         int    y = startY + slot * step;
 
-        char timeBuf[12]; fmtMs(f.durationMs, timeBuf, sizeof(timeBuf));
+        char timeBuf[16]; fmtMs(f.durationMs, timeBuf, sizeof(timeBuf));
         char row[32];
         snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, (i == best) ? " *" : "");
 
@@ -940,7 +937,7 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
         if (f.durationMs == 0) continue;
 
         int y = startY + shown * step;
-        char timeBuf[12]; fmtMs(f.durationMs, timeBuf, sizeof(timeBuf));
+        char timeBuf[16]; fmtMs(f.durationMs, timeBuf, sizeof(timeBuf));
         char row[32];
         snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, (i == best && !f.scratched) ? " *" : "");
 
