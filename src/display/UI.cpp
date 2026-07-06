@@ -449,14 +449,16 @@ void UI::begin() {
 
 // ── Main render dispatcher ────────────────────────────────────────────────────
 
-void UI::render(AppState state,
+void UI::render(AppState       state,
                 const WorkingTime& wt,
                 const FlightTimer& ft,
                 const FlightLog&   log,
                 unsigned long      scratchStartMs,
                 int                wtMinutes,
                 int                batteryPct,
-                bool               isCharging)
+                bool               isCharging,
+                const char*        pilotName,
+                BaseConnState      connState)
 {
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
@@ -464,7 +466,9 @@ void UI::render(AppState state,
     bool wasRunning    = (_prevState == STATE_WORKING_TIME_RUNNING || _prevState == STATE_FLIGHT_RUNNING);
     bool stateChanged  = (state != _prevState);
     bool screenChanged = stateChanged && !(isRunning && wasRunning);
-    _prevState = state;
+    bool connChanged   = (connState != _prevConnState);
+    _prevState     = state;
+    _prevConnState = connState;
 
     if (screenChanged) {
         _clearScreen();
@@ -473,14 +477,21 @@ void UI::render(AppState state,
 
     switch (state) {
         case STATE_IDLE:
-            if (screenChanged) {
-                _drawIdle();
+            if (screenChanged || connChanged) {
+                if (connChanged && !screenChanged) _clearScreen();
+                _drawIdle(connState, pilotName);
                 if (batteryPct >= 0) _drawBattery(batteryPct, isCharging);
                 _prevBatteryPct = batteryPct;
             } else if (batteryPct >= 0 && batteryPct != _prevBatteryPct) {
                 _drawBattery(batteryPct, isCharging);
                 _prevBatteryPct = batteryPct;
             }
+            break;
+
+        case STATE_PILOT_SELECT:
+            // Always clear and redraw — _needsRender() in main.cpp gates the call rate
+            _clearScreen();
+            _drawPilotSelect(pilotName ? pilotName : "---");
             break;
 
         case STATE_WORKING_TIME_RUNNING:
@@ -616,7 +627,7 @@ void UI::_drawBattery(int pct, bool charging) {
 
 // ── Idle ──────────────────────────────────────────────────────────────────────
 
-void UI::_drawIdle() {
+void UI::_drawIdle(BaseConnState connState, const char* pilotName) {
 #ifdef WOKWI_SIM
     _drawCentered("F3K",              DISPLAY_CX, 100, COL_WHITE, 5);
     _drawCentered("TIMER",            DISPLAY_CX, 152, COL_GRAY,  2);
@@ -635,6 +646,35 @@ void UI::_drawIdle() {
     _drawFontCentered("R = FLY + WT", WS_CX, 310, COL_WHITE, &FreeSans12pt7b);
     _drawFontCentered("L = WT ONLY", WS_CX, 340, COL_WHITE, &FreeSans12pt7b);
     _drawFontCentered("R(hold) = SET", WS_CX, 385, COL_DIMGRAY, &FreeSans9pt7b);
+
+    // Base station connection indicator (outer ring, near bottom edge, r~182 from centre)
+    if (connState == BASE_CONNECTED) {
+        const char* label = (pilotName && pilotName[0]) ? pilotName : "BASE OK";
+        _drawFontCentered(label, WS_CX, 415, COL_GREEN, &FreeSans9pt7b);
+    } else if (connState == BASE_CONNECTING) {
+        _drawFontCentered("BASE...", WS_CX, 415, COL_DIMGRAY, &FreeSans9pt7b);
+    }
+    // BASE_DISCONNECTED: show nothing — standalone mode is normal
+#endif
+}
+
+void UI::_drawPilotSelect(const char* pilotName) {
+#ifdef WOKWI_SIM
+    _drawCentered("SELECT PILOT", DISPLAY_CX, 60,  COL_GRAY,  1);
+    _drawCentered(pilotName,      DISPLAY_CX, 140, COL_WHITE, 2);
+    _drawCentered("R=NEXT L=PREV",DISPLAY_CX, 200, COL_WHITE, 1);
+    _drawCentered("HOLD R=CONFIRM",DISPLAY_CX,220, COL_GRAY,  1);
+#else
+    _gfx->fillCircle(WS_CX, WS_CY, 233, COL_BG);
+
+    _drawFontCentered("SELECT PILOT", WS_CX, 120, COL_GRAY, &FreeSans12pt7b);
+
+    // Pilot name large in centre zone
+    _drawFontCentered(pilotName, WS_CX, 233, COL_WHITE, &FreeSansBold18pt7b);
+
+    // Navigation hints
+    _drawFontCentered("R = NEXT   L = PREV", WS_CX, 330, COL_WHITE, &FreeSans9pt7b);
+    _drawFontCentered("HOLD R = CONFIRM",    WS_CX, 370, COL_DIMGRAY, &FreeSans9pt7b);
 #endif
 }
 

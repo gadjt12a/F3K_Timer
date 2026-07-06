@@ -45,5 +45,30 @@ enum AppState : uint8_t {
     STATE_FLIGHT_RUNNING,
     STATE_SCRATCH_CONFIRM,
     STATE_WORKING_TIME_EXPIRED,
-    STATE_SETTINGS
+    STATE_SETTINGS,
+    STATE_PILOT_SELECT          // connected to base: choose pilot before each round
 };
+
+// ── Base station connection state (for UI indicator) ─────────────────────────
+enum BaseConnState : uint8_t {
+    BASE_DISCONNECTED = 0,
+    BASE_CONNECTING,
+    BASE_CONNECTED
+};
+
+// ── Pilot ─────────────────────────────────────────────────────────────────────
+#define MAX_PILOT_NAME  15      // "FirstName XXX" + null terminator
+#define MAX_PILOTS      12
+
+struct Pilot {
+    int  id;
+    char name[MAX_PILOT_NAME + 1];
+};
+
+// ── WiFi / base station ───────────────────────────────────────────────────────
+// Hardcoded — closed, dedicated timer network, no security risk.
+// Timer AP is run by the base station; timers connect as STA.
+#define WIFI_SSID       "F3K_BASE"
+#define WIFI_PASSWORD   "f3ktimer"
+#define BASE_HOST       "192.168.10.1"  // base station gateway IP on timer AP
+#define BASE_PORT       8765

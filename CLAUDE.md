@@ -64,18 +64,20 @@ as a timekeeper would expect.
 
 **This means both physical buttons are used for in-flight input on real hardware:**
 
-| Physical button | GPIO / source | Role            |
-|-----------------|---------------|-----------------|
-| PWR (top-left when rotated) | AXP2101 power-key IRQ | Button A — primary (start/stop flight) |
-| BOOT (top-right when rotated) | GPIO0 | Button B — secondary (scratch / abort) |
+| Physical button | GPIO / source | Code name | Role |
+|-----------------|---------------|-----------|------|
+| BOOT (top-right when rotated) | GPIO0 | `btnB` / **R** | **Primary** — start/stop flight, confirm scratch, navigate settings |
+| PWR (top-left when rotated) | AXP2101 power-key IRQ | `btnA` / **L** | **Secondary** — start WT only, trigger scratch, adjust settings |
+
+> In `main.cpp` these are aliased as `btnR` (BOOT) and `btnL` (PWR) to reflect their physical position after rotation. The `Buttons` API still calls them A and B internally.
 
 > **GPIO0 strapping pin note:** GPIO0 held LOW at power-on forces download mode.
 > Enable it as an input only after `setup()` has run — the bootloader window closes
 > before user code starts. A brief press during normal operation is completely safe.
-> Document for users: do not hold Button B while pressing Reset/Power-on.
+> Document for users: do not hold R (BOOT) while pressing Reset/Power-on.
 
 Touch gestures (CST9217 swipe) remain available as a supplementary input path on
-hardware but are no longer the primary Button B mechanism.
+hardware but are no longer the primary mechanism.
 
 ---
 
@@ -216,35 +218,40 @@ SWIPE_MAX_MS    500   // maximum swipe duration to register
 
 ## Application State Machine
 
+R = BOOT button (right, primary) — `btnB` in Buttons API, `btnR` in main.cpp
+L = PWR button (left, secondary) — `btnA` in Buttons API, `btnL` in main.cpp
+"R hold" = 800ms (LONG_PRESS_MS). "R hold 2s" = very long press (VERY_LONG_PRESS_MS).
+
 ```
 IDLE
-  → [A click]       → FLIGHT_RUNNING  (starts WT + flight timer simultaneously)
-  → [B hold]        → SETTINGS
+  → [R hold]        → SETTINGS
+  → [R click]       → FLIGHT_RUNNING  (starts WT + flight timer simultaneously)
+  → [L click]       → WORKING_TIME_RUNNING (starts WT only — wait for pilot to launch)
 
 WORKING_TIME_RUNNING
-  → [A click]       → FLIGHT_RUNNING  (start next flight)
-  → [B click]       → SCRATCH_CONFIRM (if flights exist)
-  → [B hold]        → WORKING_TIME_EXPIRED (abort round)
+  → [R click]       → FLIGHT_RUNNING  (start next flight)
+  → [L click]       → SCRATCH_CONFIRM (if flights exist — scratch last recorded flight)
+  → [R hold 2s]     → WORKING_TIME_EXPIRED (abort round)
   → [WT expired]    → WORKING_TIME_EXPIRED
 
 FLIGHT_RUNNING
-  → [A click]       → WORKING_TIME_RUNNING (stop flight, record time)
-  → [B hold]        → WORKING_TIME_EXPIRED (abort round)
-  → [WT expired]    → WORKING_TIME_EXPIRED (auto-stop flight)
+  → [R click]       → WORKING_TIME_RUNNING (stop flight, record time)
+  → [R hold 2s]     → WORKING_TIME_EXPIRED (abort round, discard in-progress flight)
+  → [WT expired]    → WORKING_TIME_EXPIRED (auto-stop and record flight)
 
 SCRATCH_CONFIRM
-  → [B click]       → WORKING_TIME_RUNNING (flight scratched)
-  → [timeout 2s]    → WORKING_TIME_RUNNING (cancel)
-  → [B hold]        → WORKING_TIME_EXPIRED (abort round)
+  → [R click]       → WORKING_TIME_RUNNING (confirmed — flight scratched)
+  → [timeout 2s]    → WORKING_TIME_RUNNING (cancelled — no change)
+  → [R hold 2s]     → WORKING_TIME_EXPIRED (abort round)
   → [WT expired]    → WORKING_TIME_EXPIRED
 
 WORKING_TIME_EXPIRED
-  → [A click]       → IDLE
+  → [R click]       → IDLE
 
 SETTINGS
-  → [A click]       → +1 minute
-  → [B click]       → -1 minute
-  → [A hold]        → IDLE (confirm)
+  → [R click]       → +1 minute
+  → [L click]       → -1 minute
+  → [R hold]        → IDLE (confirm)
   → [8s inactivity] → IDLE (auto-confirm)
 ```
 
@@ -255,11 +262,7 @@ SETTINGS
 ### Overview of current implementation state
 
 - **`[env:wokwi]` path in `UI.cpp`**: Fully implemented for ILI9341 240×320 rectangular display.
-  Y coordinates are hard-coded for portrait rectangular layout (Y_WT_LABEL=80, etc.).
-- **`[env:waveshare]` path in `UI.cpp`**: **NOT YET IMPLEMENTED.**
-  When building the waveshare render path, write it from scratch using radial/zone layout
-  described in the Round Display Constraints section below. Do NOT adapt the Wokwi Y-coordinate
-  layout — it is fundamentally rectangular and will look wrong on a round display.
+- **`[env:waveshare]` path in `UI.cpp`**: **Fully implemented and working on real hardware.** Uses `Arduino_Canvas` for software rotation (CO5300 does not support hardware rotation). Custom `ws_fillRing()` and `ws_eraseRingRadial()` helpers work around CO5300 QSPI not supporting `writeFastHLine`. Typography uses FreeFonts from the GFX Library for Arduino (resolved via the library include path — the `fonts/` directory in the lib provides them).
 
 ### Config constants (set per environment via build flags)
 
@@ -493,8 +496,8 @@ f3k-timer/
       Tones.h/.cpp        ← I2S sine wave alerts (HW) or stub (sim)
     storage/              ← Phase 2
       FlashStorage.h/.cpp ← NVS persistence via Preferences
-    comms/                ← Phase 3: ESP-NOW
-      ESPNow.h/.cpp
+    comms/                ← Phase 2 addition: WiFi client for base station AP
+      WiFiClient.h/.cpp   ← join base station timer AP, bidirectional protocol, OTA
   docs/
     HARDWARE_ENV.md       ← [env:waveshare] platformio block + flash instructions
     INPUT_DESIGN.md       ← touch gesture spec, button ergonomics rationale
@@ -535,10 +538,10 @@ f3k-timer/
 9. **`delay()` in audio/display** — forbidden. Use `millis()` deltas, FreeRTOS tasks,
    or I2S DMA callbacks for any time-based audio work.
 
-10. **Wokwi UI layout ≠ Waveshare UI layout** — `UI.cpp` currently only has the Wokwi
-    (rectangular) render path. When implementing the waveshare path, do NOT adapt the
-    Wokwi Y-coordinate layout. Build it from scratch using the radial zone system
-    defined in "Round Display Constraints" above.
+10. **Wokwi UI layout ≠ Waveshare UI layout** — The two render paths are fundamentally
+    different. Wokwi uses Y-coordinate constants for a 240×320 portrait layout. Waveshare
+    uses radial zone constants (WS_Y_*) for 466×466 round. Never share layout constants
+    between the two paths.
 
 11. **Touch coordinate rotation** — CST9217 reports raw coordinates for 0° orientation.
     After `setRotation(1)`, apply: `rotX = y_raw; rotY = (466 - x_raw)` before using

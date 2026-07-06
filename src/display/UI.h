@@ -19,14 +19,16 @@ class UI {
 public:
     void begin();
 
-    void render(AppState state,
+    void render(AppState       state,
                 const WorkingTime& wt,
                 const FlightTimer& ft,
                 const FlightLog&   log,
-                unsigned long      scratchStartMs = 0,
-                int                wtMinutes      = 10,
-                int                batteryPct     = -1,
-                bool               isCharging     = false);
+                unsigned long      scratchStartMs  = 0,
+                int                wtMinutes       = 10,
+                int                batteryPct      = -1,
+                bool               isCharging      = false,
+                const char*        pilotName       = nullptr,   // selected pilot (pilot select + running)
+                BaseConnState      connState       = BASE_DISCONNECTED);
 
 private:
 #ifdef WOKWI_SIM
@@ -37,7 +39,8 @@ private:
     Arduino_Canvas*   _gfx     = nullptr;  // Canvas with software rotation
 #endif
 
-    AppState _prevState    = (AppState)255;
+    AppState      _prevState     = (AppState)255;
+    BaseConnState _prevConnState = (BaseConnState)255;
     int      _prevWtSecs   = -1;
     int      _prevFlashSecs = -1;
     bool     _arcVisible   = true;
@@ -53,7 +56,9 @@ private:
                            const FlightTimer& ft);
     void _updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const FlightLog& log);
 
-    void _drawIdle();
+    void _drawIdle(BaseConnState connState = BASE_DISCONNECTED,
+                  const char* pilotName = nullptr);
+    void _drawPilotSelect(const char* pilotName);
     void _drawExpired(const FlightLog& log);
 
     void _drawSettings(int minutes);
@@ -66,9 +71,7 @@ private:
                                int startY,
                                int maxShown);
     void _drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t size);
-#ifndef WOKWI_SIM
     void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font);
-#endif
     void _updateArc(int remaining, int total);
     void _drawArc(int remaining, int total, uint16_t color);
     void _drawArcSegment(float startDeg, float endDeg, uint16_t color);
