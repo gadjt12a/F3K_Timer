@@ -155,6 +155,7 @@ void loop() {
             g_log.addFlight(dur);
             g_comms.sendFlight(g_selectedPilotId, dur);
         }
+        g_wt.reset();
         g_tones.silence();
         g_state = STATE_WORKING_TIME_EXPIRED;
     }
@@ -204,6 +205,7 @@ void loop() {
             if (g_wt.isExpired()) { g_state = STATE_WORKING_TIME_EXPIRED; break; }
             if (btnR_veryLong) {
                 // Very long R hold (2s): abort round, go to times screen
+                g_wt.reset();
                 g_tones.silence();
                 g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
@@ -234,6 +236,7 @@ void loop() {
             if (btnR_veryLong) {
                 // Very long R hold (2s): abort round, discard in-progress flight
                 g_ft.stop();
+                g_wt.reset();
                 g_tones.silence();
                 g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
@@ -251,6 +254,7 @@ void loop() {
             if (g_wt.isExpired()) { g_state = STATE_WORKING_TIME_EXPIRED; break; }
             if (btnR_veryLong) {
                 // Very long R hold: abort round
+                g_wt.reset();
                 g_tones.silence();
                 g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
