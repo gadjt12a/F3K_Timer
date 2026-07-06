@@ -15,6 +15,9 @@ A hand-held F3K (discus-launched glider) competition timer for a **caller** — 
 - Audio alerts at key time thresholds (30s, 15s, 10-1s countdown)
 - Configurable working time (1-15 minutes)
 - Battery indicator
+- **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS commands, reports flights back
+- **Pilot selection UI** — driven by PILOTS command from base station
+- **Connection indicator** — idle screen shows BASE... (grey) while connecting, BASE OK (green) when live
 
 ## Hardware
 
@@ -23,6 +26,12 @@ A hand-held F3K (discus-launched glider) competition timer for a **caller** — 
 - ESP32-S3 dual-core
 - ES8311 audio codec
 - AXP2101 power management
+
+## Base Station
+
+The timer connects as a WiFi client to the F3K base station AP (`F3K_BASE`). The base station is a Raspberry Pi 4 running `server.py` on port 8765. See the `F3K_Timer_Project` repo for the base station setup.
+
+Network credentials are hardcoded in `include/config.h` — the timer AP is a closed, dedicated network.
 
 ## Simulation (Wokwi)
 
@@ -72,9 +81,10 @@ You can run this project in simulation without the physical hardware.
 
 ## Building for Hardware
 
-```
-pio run -e waveshare
-pio run -e waveshare --target upload
+On Windows, `pio` is not on PATH — use the full PlatformIO path:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e waveshare --target upload --project-dir "C:\Kris\Projects\F3K_Timer_1"
 ```
 
 ## License
