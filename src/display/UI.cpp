@@ -458,7 +458,8 @@ void UI::render(AppState       state,
                 int                batteryPct,
                 bool               isCharging,
                 const char*        pilotName,
-                BaseConnState      connState)
+                BaseConnState      connState,
+                int                countdownN)
 {
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
@@ -548,6 +549,28 @@ void UI::render(AppState       state,
             if (screenChanged) _drawSettings(wtMinutes);
             else               _drawSettingsInc(wtMinutes);
             break;
+
+        case STATE_COUNTDOWN: {
+            // Clear on every render (called only when n changes — once per second)
+            if (!screenChanged) _clearScreen();
+            if (countdownN > 0) {
+                // Anticlockwise green arc: full at 10, shrinks from the clockwise side of 12
+                float startDeg = (10 - countdownN) * 36.0f;
+                _drawArcSegment(startDeg, 360.0f, COL_ARC_GREEN);
+            }
+            {
+                char buf[4];
+                snprintf(buf, sizeof(buf), "%d", countdownN);
+#ifdef WOKWI_SIM
+                _drawCentered(buf,        DISPLAY_CX, DISPLAY_CY - 20, COL_WHITE, 8);
+                _drawCentered("GET READY",DISPLAY_CX, DISPLAY_CY + 40, COL_GREEN, 2);
+#else
+                _drawFontCentered(buf,         WS_CX, WS_CY - 20, COL_WHITE,     &FreeSansBold24pt7b);
+                _drawFontCentered("GET READY", WS_CX, WS_CY + 70, COL_ARC_GREEN, &FreeSans12pt7b);
+#endif
+            }
+            break;
+        }
     }
 
 #ifndef WOKWI_SIM

@@ -227,6 +227,18 @@ IDLE
   → [R hold]        → SETTINGS
   → [R click]       → FLIGHT_RUNNING  (starts WT + flight timer simultaneously)
   → [L click]       → WORKING_TIME_RUNNING (starts WT only — wait for pilot to launch)
+  → [base: COUNT N] → COUNTDOWN
+
+PILOT_SELECT  (entered when base sends PILOTS command)
+  → [R click]       → scroll to next pilot
+  → [L click]       → scroll to previous pilot
+  → [R hold]        → IDLE (pilot confirmed)
+  → [base: COUNT N] → COUNTDOWN
+
+COUNTDOWN  (base sends COUNT 10..1 during last 10s of prep)
+  → [base: COUNT N] → update arc display (no button input)
+  → [base: START]   → WORKING_TIME_RUNNING (+ long beep)
+  Displays: green anticlockwise arc, large countdown number, short beep per tick
 
 WORKING_TIME_RUNNING
   → [R click]       → FLIGHT_RUNNING  (start next flight)
@@ -442,6 +454,13 @@ No vibration motor — audio only.
 | 1s             | Long low tone        | 440       | 400ms      |
 | 0s             | Descending tone      | 880→440   | 800ms      |
 
+Additional tones:
+
+| Event                          | Function            | Freq (Hz) | Duration |
+|-------------------------------|---------------------|-----------|----------|
+| Countdown tick (COUNT N)       | `playAlert(N)`      | N × 110   | 100ms    |
+| Window open (START from COUNT) | `playWindowOpen()`  | 1200      | 1200ms   |
+
 - Alert triggers are checked in `WorkingTime::update()` — fire-once flags per point
 - Tone generation: I2S DMA with sine wave buffer (hardware); stub (Wokwi)
 - Speaker amp: `digitalWrite(PA_EN, HIGH)` before playback, `LOW` when idle
@@ -465,6 +484,43 @@ The `Buttons` class is the primary place this pattern appears. `UI.cpp` uses it
 for display initialisation (different GFX constructors and render logic). `Tones.cpp`
 uses it for I2S vs stub. Keep the guard at the implementation level — the `.h`
 interfaces stay identical between environments.
+
+---
+
+## Base Station TCP Protocol
+
+Timer connects to base station AP (F3K_BASE) and opens a TCP connection to port 8765.
+All messages are newline-terminated ASCII. `TimerComms.h/.cpp` handles this.
+
+### Timer → Base
+
+| Message                        | When                                |
+|-------------------------------|-------------------------------------|
+| `JOIN mac=<MAC>`               | On connect / reconnect              |
+| `FLIGHT pilot=<id> dur=<ms>`  | After pilot stops a flight          |
+| `PING`                         | Every 30s keepalive                 |
+
+### Base → Timer
+
+| Message                        | Timer action                                         |
+|-------------------------------|------------------------------------------------------|
+| `ASSIGN id=<N>`                | Store timer ID; triggers `send_catchup()` on reconnect |
+| `PILOTS <id>:<name>,...`       | Build pilot list → enter `STATE_PILOT_SELECT`        |
+| `TASK wt=<seconds>`            | Set working time before START                        |
+| `START`                        | Start round; if in `STATE_COUNTDOWN`, play long beep |
+| `STOP`                         | Stop round, go to `STATE_WORKING_TIME_EXPIRED`       |
+| `COUNT <N>`                    | 10..1 countdown during last 10s of prep → `STATE_COUNTDOWN` |
+| `PONG`                         | Response to PING (no action required)                |
+
+### Reconnect behaviour (`send_catchup`)
+
+When a timer reconnects mid-round, the base immediately calls `send_catchup()`:
+- Always sends `PILOTS` if in any non-IDLE state
+- Also sends `TASK wt=...` + `START` if state is WORKING
+
+This means a timer that drops WiFi during PREP will rejoin in pilot-select; one that
+drops during WORKING will rejoin and start the full working time from scratch
+(known limitation — no timestamp recovery yet).
 
 ---
 
@@ -496,8 +552,8 @@ f3k-timer/
       Tones.h/.cpp        ← I2S sine wave alerts (HW) or stub (sim)
     storage/              ← Phase 2
       FlashStorage.h/.cpp ← NVS persistence via Preferences
-    comms/                ← Phase 2 addition: WiFi client for base station AP
-      WiFiClient.h/.cpp   ← join base station timer AP, bidirectional protocol, OTA
+    comms/
+      TimerComms.h/.cpp   ← WiFi TCP client: JOIN, PILOTS, COUNT, TASK, START, STOP, FLIGHT, PING
   docs/
     HARDWARE_ENV.md       ← [env:waveshare] platformio block + flash instructions
     INPUT_DESIGN.md       ← touch gesture spec, button ergonomics rationale

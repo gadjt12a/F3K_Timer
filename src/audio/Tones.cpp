@@ -374,6 +374,16 @@ void Tones::update() {
 #endif
 }
 
+void Tones::playWindowOpen() {
+#ifdef WOKWI_SIM
+    tone(BUZZER_SIM, 1200, 1200);
+#endif
+#ifdef WAVESHARE_HW
+    if (!_audioReady) return;
+    _queueTone(1200, 1200);  // sustained high note — window is open
+#endif
+}
+
 void Tones::testTone() {
 #ifdef WOKWI_SIM
     Serial.println("[TONE] Playing startup beep (Wokwi)");

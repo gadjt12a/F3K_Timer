@@ -18,6 +18,7 @@ public:
     void begin();
     void update();
     void playAlert(int timeRemaining);
+    void playWindowOpen();      // long high beep: WT window opening
     void silence();
     void testTone();
 

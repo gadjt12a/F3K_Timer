@@ -22,9 +22,11 @@ public:
     bool hasStopCommand();      // base sent STOP
     bool hasTaskUpdate();       // base sent TASK — read getTaskWtSeconds() before next update
     bool hasPilotList();        // base sent PILOTS
+    bool hasCountdown();        // base sent COUNT N — read getCountdownN() before next call
 
     int  getTaskWtSeconds() const { return _taskWtSeconds; }
     int  getTimerId()       const { return _timerId; }
+    int  getCountdownN()    const { return _countdownN; }
 
     int          getPilotCount()    const { return _pilotCount; }
     const Pilot& getPilot(int idx)  const { return _pilots[idx]; }
@@ -42,6 +44,8 @@ private:
     bool _hasStopCommand  = false;
     bool _hasTaskUpdate   = false;
     bool _hasPilotList    = false;
+    bool _hasCountdown    = false;
+    int  _countdownN      = 0;
 
     unsigned long _budgetStartMs    = 0;  // start of current 5-min connect window
     unsigned long _connectStartMs   = 0;  // start of current WiFi attempt (60s each)

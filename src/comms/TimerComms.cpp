@@ -106,6 +106,7 @@ bool TimerComms::hasStartCommand()  { bool v = _hasStartCommand;  _hasStartComma
 bool TimerComms::hasStopCommand()   { bool v = _hasStopCommand;   _hasStopCommand   = false; return v; }
 bool TimerComms::hasTaskUpdate()    { bool v = _hasTaskUpdate;    _hasTaskUpdate    = false; return v; }
 bool TimerComms::hasPilotList()     { bool v = _hasPilotList;     _hasPilotList     = false; return v; }
+bool TimerComms::hasCountdown()     { bool v = _hasCountdown;     _hasCountdown     = false; return v; }
 
 void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
 #ifndef WOKWI_SIM
@@ -164,6 +165,11 @@ void TimerComms::_parseLine(const char* line) {
 
     } else if (strncmp(line, "PILOTS ", 7) == 0) {
         _parsePilots(line + 7);
+
+    } else if (strncmp(line, "COUNT ", 6) == 0) {
+        _countdownN  = atoi(line + 6);
+        _hasCountdown = true;
+        Serial.printf("[COMMS] Countdown: %d\n", _countdownN);
 
     } else if (strcmp(line, "PONG") == 0) {
         // keepalive — _lastRxMs already updated above

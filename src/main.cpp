@@ -37,8 +37,10 @@ static unsigned long _nextScratchMs  = 0;
 static unsigned long _nextFlashMs    = 0;
 static unsigned long _nextTimeMs     = 0;
 
-static int           _lastPilotIdx  = -1;
-static BaseConnState _lastConnState = (BaseConnState)255;
+static int           _lastPilotIdx    = -1;
+static BaseConnState _lastConnState   = (BaseConnState)255;
+static int           _lastCountdownN  = -1;
+static int           g_countdownN     = 0;
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
@@ -51,6 +53,7 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
         if (millis() >= _nextTimeMs) return true;
         if (wtSecs <= ARC_RED_THRESHOLD && wtSecs > 0) return millis() >= _nextFlashMs;
     }
+    if (state == STATE_COUNTDOWN) return g_countdownN != _lastCountdownN;
     return false;
 }
 
@@ -59,12 +62,13 @@ static void _doRender(AppState state, int wtSecs) {
     bool charging  = g_btns.isCharging();
     const char* pilot = (g_selectedPilotName[0] != '\0') ? g_selectedPilotName : nullptr;
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
-                battPct, charging, pilot, g_comms.baseConnState());
-    _lastState     = state;
-    _lastWtSecs    = wtSecs;
-    _lastWtMinutes = g_wtMinutes;
-    _lastConnState = g_comms.baseConnState();
-    _lastPilotIdx  = g_selectedPilotIdx;
+                battPct, charging, pilot, g_comms.baseConnState(), g_countdownN);
+    _lastState      = state;
+    _lastWtSecs     = wtSecs;
+    _lastWtMinutes  = g_wtMinutes;
+    _lastConnState  = g_comms.baseConnState();
+    _lastPilotIdx   = g_selectedPilotIdx;
+    _lastCountdownN = g_countdownN;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
@@ -142,9 +146,16 @@ void loop() {
         g_state = STATE_PILOT_SELECT;
     }
 
+    if (g_comms.hasCountdown() &&
+        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT || g_state == STATE_COUNTDOWN)) {
+        g_countdownN = g_comms.getCountdownN();
+        g_tones.playAlert(g_countdownN);  // short beep each second
+        g_state = STATE_COUNTDOWN;
+    }
+
     if (g_comms.hasStartCommand() &&
-        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT)) {
-        // Base commanded start — enter WT only (pilot hasn't launched yet)
+        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT || g_state == STATE_COUNTDOWN)) {
+        if (g_state == STATE_COUNTDOWN) g_tones.playWindowOpen();
         _startRound(false);
     }
 
@@ -186,6 +197,10 @@ void loop() {
             }
             break;
         }
+
+        case STATE_COUNTDOWN:
+            // Display-only state — no button handling, awaiting START from base
+            break;
 
         case STATE_IDLE:
             if (btnR_held) {

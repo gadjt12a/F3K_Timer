@@ -46,7 +46,8 @@ enum AppState : uint8_t {
     STATE_SCRATCH_CONFIRM,
     STATE_WORKING_TIME_EXPIRED,
     STATE_SETTINGS,
-    STATE_PILOT_SELECT          // connected to base: choose pilot before each round
+    STATE_PILOT_SELECT,         // connected to base: choose pilot before each round
+    STATE_COUNTDOWN             // base sent COUNT 10..1: green arc countdown to WT start
 };
 
 // ── Base station connection state (for UI indicator) ─────────────────────────

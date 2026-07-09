@@ -28,7 +28,8 @@ public:
                 int                batteryPct      = -1,
                 bool               isCharging      = false,
                 const char*        pilotName       = nullptr,   // selected pilot (pilot select + running)
-                BaseConnState      connState       = BASE_DISCONNECTED);
+                BaseConnState      connState       = BASE_DISCONNECTED,
+                int                countdownN      = 0);        // 1-10: countdown to WT start
 
 private:
 #ifdef WOKWI_SIM
