@@ -27,16 +27,19 @@ public:
     int  getTaskWtSeconds() const { return _taskWtSeconds; }
     int  getTimerId()       const { return _timerId; }
     int  getCountdownN()    const { return _countdownN; }
+    bool isF5K()            const { return _isF5K; }
 
     int          getPilotCount()    const { return _pilotCount; }
     const Pilot& getPilot(int idx)  const { return _pilots[idx]; }
 
     void sendFlight(int pilotId, unsigned long durationMs);
+    void sendAltitude(int pilotId, int flightNo, int altM);
 
 private:
     CommsState _state         = COMMS_IDLE;
     int        _timerId       = -1;
     int        _taskWtSeconds = 600;
+    bool       _isF5K         = false;
     int        _pilotCount    = 0;
     Pilot      _pilots[MAX_PILOTS];
 

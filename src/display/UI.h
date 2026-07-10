@@ -29,7 +29,8 @@ public:
                 bool               isCharging      = false,
                 const char*        pilotName       = nullptr,   // selected pilot (pilot select + running)
                 BaseConnState      connState       = BASE_DISCONNECTED,
-                int                countdownN      = 0);        // 1-10: countdown to WT start
+                int                countdownN      = 0,         // 1-10: countdown to WT start
+                int                altitudeM       = 0);        // F5K altitude entry (m)
 
 private:
 #ifdef WOKWI_SIM
@@ -71,6 +72,8 @@ private:
     void _drawFlightLogExpired(const FlightLog& log,
                                int startY,
                                int maxShown);
+    void _drawAltitudeEntry(int altM);
+    void _drawAltitudeEntryInc(int altM);
     void _drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t size);
     void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font);
     void _updateArc(int remaining, int total);

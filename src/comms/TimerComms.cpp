@@ -122,6 +122,15 @@ void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
 #endif
 }
 
+void TimerComms::sendAltitude(int pilotId, int flightNo, int altM) {
+#ifndef WOKWI_SIM
+    if (_state != COMMS_CONNECTED) return;
+    char buf[48];
+    snprintf(buf, sizeof(buf), "ALTITUDE pilot=%d flight=%d alt=%d", pilotId, flightNo, altM);
+    _sendLine(buf);
+#endif
+}
+
 // ── Private — WiFi/TCP ────────────────────────────────────────────────────────
 
 #ifndef WOKWI_SIM
@@ -157,8 +166,10 @@ void TimerComms::_parseLine(const char* line) {
 
     } else if (strncmp(line, "TASK wt=", 8) == 0) {
         _taskWtSeconds = atoi(line + 8);
+        const char* disc = strstr(line, "disc=");
+        _isF5K = disc && strncmp(disc + 5, "F5K", 3) == 0;
         _hasTaskUpdate = true;
-        Serial.printf("[COMMS] Task update: WT=%ds\n", _taskWtSeconds);
+        Serial.printf("[COMMS] Task update: WT=%ds disc=%s\n", _taskWtSeconds, _isF5K ? "F5K" : "F3K");
 
     } else if (strcmp(line, "START") == 0) {
         _hasStartCommand = true;

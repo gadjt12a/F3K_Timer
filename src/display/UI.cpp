@@ -459,7 +459,8 @@ void UI::render(AppState       state,
                 bool               isCharging,
                 const char*        pilotName,
                 BaseConnState      connState,
-                int                countdownN)
+                int                countdownN,
+                int                altitudeM)
 {
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
@@ -548,6 +549,11 @@ void UI::render(AppState       state,
         case STATE_SETTINGS:
             if (screenChanged) _drawSettings(wtMinutes);
             else               _drawSettingsInc(wtMinutes);
+            break;
+
+        case STATE_ALTITUDE_ENTRY:
+            if (screenChanged) _drawAltitudeEntry(altitudeM);
+            else               _drawAltitudeEntryInc(altitudeM);
             break;
 
         case STATE_COUNTDOWN: {
@@ -837,6 +843,40 @@ void UI::_drawExpired(const FlightLog& log) {
     // All flight times below - includes scratched in red with strikethrough
     _drawFlightLogExpired(log, 130, 8);
     _drawFontCentered("R = RESTART", WS_CX, 420, COL_GRAY, &FreeSans12pt7b);
+#endif
+}
+
+// ── Altitude entry (F5K) ─────────────────────────────────────────────────────
+
+void UI::_drawAltitudeEntry(int altM) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", altM);
+
+#ifdef WOKWI_SIM
+    _drawCentered("ALTITUDE",      DISPLAY_CX, 60,  COL_GRAY,  1);
+    _drawCentered(buf,             DISPLAY_CX, 150, COL_WHITE, 5);
+    _drawCentered("m",             DISPLAY_CX, 195, COL_GRAY,  2);
+    _drawCentered("R=+1  L=+10",  DISPLAY_CX, 245, COL_WHITE, 1);
+    _drawCentered("HOLD R = OK",  DISPLAY_CX, 265, COL_GRAY,  1);
+#else
+    _drawFontCentered("ALTITUDE",           WS_CX, 110, COL_GRAY,       &FreeSans12pt7b);
+    _drawFontCentered(buf,                  WS_CX, 240, COL_WHITE,      &FreeMonoBold24pt7b);
+    _drawFontCentered("m",                  WS_CX, 300, COL_GRAY,       &FreeSansBold18pt7b);
+    _drawFontCentered("R = +1m   L = +10m", WS_CX, 370, COL_WHITE,      &FreeSans12pt7b);
+    _drawFontCentered("HOLD R = CONFIRM",  WS_CX, 408, COL_DIMGRAY,    &FreeSans9pt7b);
+#endif
+}
+
+void UI::_drawAltitudeEntryInc(int altM) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", altM);
+
+#ifdef WOKWI_SIM
+    _tft.fillRect(DISPLAY_CX - 55, 115, 110, 55, COL_BG);
+    _drawCentered(buf, DISPLAY_CX, 150, COL_WHITE, 5);
+#else
+    _gfx->fillRect(WS_CX - 100, 195, 200, 70, COL_BG);
+    _drawFontCentered(buf, WS_CX, 240, COL_WHITE, &FreeMonoBold24pt7b);
 #endif
 }
 

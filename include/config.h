@@ -47,7 +47,8 @@ enum AppState : uint8_t {
     STATE_WORKING_TIME_EXPIRED,
     STATE_SETTINGS,
     STATE_PILOT_SELECT,         // connected to base: choose pilot before each round
-    STATE_COUNTDOWN             // base sent COUNT 10..1: green arc countdown to WT start
+    STATE_COUNTDOWN,            // base sent COUNT 10..1: green arc countdown to WT start
+    STATE_ALTITUDE_ENTRY        // F5K only: enter altitude (m) after each flight
 };
 
 // ── Base station connection state (for UI indicator) ─────────────────────────

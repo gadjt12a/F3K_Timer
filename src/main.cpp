@@ -22,6 +22,11 @@ static unsigned long g_scratchStartMs  = 0;
 static int           g_wtMinutes       = 10;   // user-selected working time (minutes)
 static unsigned long g_settingsLastMs  = 0;    // tracks inactivity for auto-confirm
 
+// F5K altitude entry
+static int  g_altitudeM      = 0;
+static int  g_altFlightNo    = 0;
+static bool g_altAfterExpiry = false;  // true if WT already expired when entering altitude
+
 // Pilot selection (only used when connected to base station)
 static int  g_selectedPilotIdx = 0;
 static int  g_selectedPilotId  = 0;
@@ -41,6 +46,7 @@ static int           _lastPilotIdx    = -1;
 static BaseConnState _lastConnState   = (BaseConnState)255;
 static int           _lastCountdownN  = -1;
 static int           g_countdownN     = 0;
+static int           _lastAltitudeM   = -1;
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
@@ -53,7 +59,8 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
         if (millis() >= _nextTimeMs) return true;
         if (wtSecs <= ARC_RED_THRESHOLD && wtSecs > 0) return millis() >= _nextFlashMs;
     }
-    if (state == STATE_COUNTDOWN) return g_countdownN != _lastCountdownN;
+    if (state == STATE_COUNTDOWN)      return g_countdownN != _lastCountdownN;
+    if (state == STATE_ALTITUDE_ENTRY) return g_altitudeM  != _lastAltitudeM;
     return false;
 }
 
@@ -62,13 +69,14 @@ static void _doRender(AppState state, int wtSecs) {
     bool charging  = g_btns.isCharging();
     const char* pilot = (g_selectedPilotName[0] != '\0') ? g_selectedPilotName : nullptr;
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
-                battPct, charging, pilot, g_comms.baseConnState(), g_countdownN);
+                battPct, charging, pilot, g_comms.baseConnState(), g_countdownN, g_altitudeM);
     _lastState      = state;
     _lastWtSecs     = wtSecs;
     _lastWtMinutes  = g_wtMinutes;
     _lastConnState  = g_comms.baseConnState();
     _lastPilotIdx   = g_selectedPilotIdx;
     _lastCountdownN = g_countdownN;
+    _lastAltitudeM  = g_altitudeM;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
@@ -245,7 +253,14 @@ void loop() {
                 unsigned long dur = g_ft.stop();
                 g_log.addFlight(dur);
                 g_comms.sendFlight(g_selectedPilotId, dur);
-                g_state = STATE_WORKING_TIME_EXPIRED;
+                if (g_comms.isF5K()) {
+                    g_altitudeM   = 0;
+                    g_altFlightNo = g_log.count();
+                    g_altAfterExpiry = true;
+                    g_state = STATE_ALTITUDE_ENTRY;
+                } else {
+                    g_state = STATE_WORKING_TIME_EXPIRED;
+                }
                 break;
             }
             if (btnR_veryLong) {
@@ -261,9 +276,37 @@ void loop() {
                 unsigned long dur = g_ft.stop();
                 g_log.addFlight(dur);
                 g_comms.sendFlight(g_selectedPilotId, dur);
-                g_state = STATE_WORKING_TIME_RUNNING;
+                if (g_comms.isF5K()) {
+                    g_altitudeM   = 0;
+                    g_altFlightNo = g_log.count();
+                    g_altAfterExpiry = false;
+                    g_state = STATE_ALTITUDE_ENTRY;
+                } else {
+                    g_state = STATE_WORKING_TIME_RUNNING;
+                }
             }
             break;
+
+        case STATE_ALTITUDE_ENTRY: {
+            // WT expired while pilot was still entering altitude
+            if (!g_altAfterExpiry && g_wt.isExpired()) {
+                g_comms.sendAltitude(g_selectedPilotId, g_altFlightNo, g_altitudeM);
+                g_state = STATE_WORKING_TIME_EXPIRED;
+                break;
+            }
+            if (btnR_held) {
+                // Confirm altitude and return
+                g_comms.sendAltitude(g_selectedPilotId, g_altFlightNo, g_altitudeM);
+                g_state = g_altAfterExpiry ? STATE_WORKING_TIME_EXPIRED : STATE_WORKING_TIME_RUNNING;
+                break;
+            }
+            if (btnR) {
+                g_altitudeM = min(g_altitudeM + 1, 999);
+            } else if (btnL) {
+                g_altitudeM = min(g_altitudeM + 10, 999);
+            }
+            break;
+        }
 
         case STATE_SCRATCH_CONFIRM:
             if (g_wt.isExpired()) { g_state = STATE_WORKING_TIME_EXPIRED; break; }
