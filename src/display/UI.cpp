@@ -436,7 +436,7 @@ void UI::begin() {
     // Boot splash - green arc ring with text centered
     // Double thick arc (use wider ring)
     ws_fillRing(_gfx, WS_CX, WS_CY, ARC_OUTER_RADIUS + 10, ARC_INNER_RADIUS - 10, COL_GREEN);
-    _drawCentered("F3K", WS_CX, WS_CY - 20, COL_WHITE, 6);
+    _drawCentered("GLIDE", WS_CX, WS_CY - 20, COL_WHITE, 6);
     _drawCentered("TIMER", WS_CX, WS_CY + 40, COL_WHITE, 3);
     _gfx->flush();
     delay(1500);
@@ -652,7 +652,7 @@ void UI::_drawBattery(int pct, bool charging) {
 
 void UI::_drawIdle(BaseConnState connState, const char* pilotName) {
 #ifdef WOKWI_SIM
-    _drawCentered("F3K",              DISPLAY_CX, 100, COL_WHITE, 5);
+    _drawCentered("GLIDE",            DISPLAY_CX, 100, COL_WHITE, 5);
     _drawCentered("TIMER",            DISPLAY_CX, 152, COL_GRAY,  2);
     _drawCentered("R = FLY + WT",     DISPLAY_CX, 200, COL_WHITE, 1);
     _drawCentered("L = WT ONLY",      DISPLAY_CX, 218, COL_WHITE, 1);
@@ -662,7 +662,7 @@ void UI::_drawIdle(BaseConnState connState, const char* pilotName) {
     ws_fillRing(_gfx, WS_CX, WS_CY, 225, 218, COL_DIMGRAY);
 
     // Main title with FreeFont
-    _drawFontCentered("F3K", WS_CX, 190, COL_WHITE, &FreeSansBold24pt7b);
+    _drawFontCentered("GLIDE", WS_CX, 190, COL_WHITE, &FreeSansBold24pt7b);
     _drawFontCentered("TIMER", WS_CX, 240, COL_GRAY, &FreeSansBold18pt7b);
 
     // Hints with smaller font
