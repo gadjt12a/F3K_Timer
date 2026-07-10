@@ -15,6 +15,10 @@ void TimerComms::begin() {
 #ifndef WOKWI_SIM
     Serial.println("[COMMS] Starting WiFi connect to " WIFI_SSID);
     WiFi.mode(WIFI_STA);
+    // Disable WiFi modem sleep. With sleep on (the default), the radio dozes during
+    // quiet periods (e.g. the prep countdown) and drops the TCP link ~1 min in, forcing
+    // a reconnect that loses the selected pilot mid-round. Keep the radio awake.
+    WiFi.setSleep(false);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     unsigned long now = millis();
     _budgetStartMs  = now;
@@ -47,6 +51,7 @@ void TimerComms::update() {
                 _lastTcpAttemptMs = 0;
                 WiFi.disconnect();
                 WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                WiFi.setSleep(false);
                 _connectStartMs = now;
                 break;
             }
