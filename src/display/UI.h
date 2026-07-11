@@ -30,7 +30,9 @@ public:
                 const char*        pilotName       = nullptr,   // selected pilot (pilot select + running)
                 BaseConnState      connState       = BASE_DISCONNECTED,
                 int                countdownN      = 0,         // 1-10: countdown to WT start
-                int                altitudeM       = 0);        // F5K altitude entry (m)
+                int                altitudeM       = 0,         // F5K altitude entry (m)
+                int                altFlightNo     = 0,         // which flight (1-based)
+                int                altTotalFlights = 0);        // total flights to enter
 
 private:
 #ifdef WOKWI_SIM
@@ -41,8 +43,9 @@ private:
     Arduino_Canvas*   _gfx     = nullptr;  // Canvas with software rotation
 #endif
 
-    AppState      _prevState     = (AppState)255;
-    BaseConnState _prevConnState = (BaseConnState)255;
+    AppState      _prevState        = (AppState)255;
+    BaseConnState _prevConnState   = (BaseConnState)255;
+    int           _prevAltFlightNo = -1;
     int      _prevWtSecs   = -1;
     int      _prevFlashSecs = -1;
     bool     _arcVisible   = true;
@@ -72,7 +75,7 @@ private:
     void _drawFlightLogExpired(const FlightLog& log,
                                int startY,
                                int maxShown);
-    void _drawAltitudeEntry(int altM);
+    void _drawAltitudeEntry(int altM, int flightNo, int totalFlights);
     void _drawAltitudeEntryInc(int altM);
     void _drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t size);
     void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font);

@@ -22,10 +22,9 @@ static unsigned long g_scratchStartMs  = 0;
 static int           g_wtMinutes       = 10;   // user-selected working time (minutes)
 static unsigned long g_settingsLastMs  = 0;    // tracks inactivity for auto-confirm
 
-// F5K altitude entry
-static int  g_altitudeM      = 0;
-static int  g_altFlightNo    = 0;
-static bool g_altAfterExpiry = false;  // true if WT already expired when entering altitude
+// F5K altitude entry (entered after Time Up screen, one flight at a time)
+static int  g_altitudeM   = 0;
+static int  g_altFlightNo = 0;  // 1-based index of flight being entered; 0 = not started
 
 // Pilot selection (only used when connected to base station)
 static int  g_selectedPilotIdx = 0;
@@ -47,6 +46,7 @@ static BaseConnState _lastConnState   = (BaseConnState)255;
 static int           _lastCountdownN  = -1;
 static int           g_countdownN     = 0;
 static int           _lastAltitudeM   = -1;
+static int           _lastAltFlightNo = -1;
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
@@ -60,7 +60,7 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
         if (wtSecs <= ARC_RED_THRESHOLD && wtSecs > 0) return millis() >= _nextFlashMs;
     }
     if (state == STATE_COUNTDOWN)      return g_countdownN != _lastCountdownN;
-    if (state == STATE_ALTITUDE_ENTRY) return g_altitudeM  != _lastAltitudeM;
+    if (state == STATE_ALTITUDE_ENTRY) return g_altitudeM != _lastAltitudeM || g_altFlightNo != _lastAltFlightNo;
     return false;
 }
 
@@ -69,14 +69,16 @@ static void _doRender(AppState state, int wtSecs) {
     bool charging  = g_btns.isCharging();
     const char* pilot = (g_selectedPilotName[0] != '\0') ? g_selectedPilotName : nullptr;
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
-                battPct, charging, pilot, g_comms.baseConnState(), g_countdownN, g_altitudeM);
+                battPct, charging, pilot, g_comms.baseConnState(), g_countdownN,
+                g_altitudeM, g_altFlightNo, g_log.count());
     _lastState      = state;
     _lastWtSecs     = wtSecs;
     _lastWtMinutes  = g_wtMinutes;
     _lastConnState  = g_comms.baseConnState();
     _lastPilotIdx   = g_selectedPilotIdx;
-    _lastCountdownN = g_countdownN;
-    _lastAltitudeM  = g_altitudeM;
+    _lastCountdownN  = g_countdownN;
+    _lastAltitudeM   = g_altitudeM;
+    _lastAltFlightNo = g_altFlightNo;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
@@ -127,6 +129,8 @@ static void _startRound(bool withFlight) {
     g_wt.start();
     g_log.reset();
     g_ft.reset();
+    g_altFlightNo = 0;
+    g_altitudeM   = 0;
     if (withFlight) {
         g_ft.start();
         g_state = STATE_FLIGHT_RUNNING;
@@ -148,8 +152,9 @@ void loop() {
     }
 
     if (g_comms.hasPilotList() &&
-        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT)) {
-        // Fresh pilot list — go to pilot select screen
+        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT ||
+         g_state == STATE_WORKING_TIME_EXPIRED || g_state == STATE_ALTITUDE_ENTRY)) {
+        // Fresh pilot list — go to pilot select screen (accept from any inactive state)
         _selectPilot(0);
         g_state = STATE_PILOT_SELECT;
     }
@@ -253,14 +258,7 @@ void loop() {
                 unsigned long dur = g_ft.stop();
                 g_log.addFlight(dur);
                 g_comms.sendFlight(g_selectedPilotId, dur);
-                if (g_comms.isF5K()) {
-                    g_altitudeM   = 0;
-                    g_altFlightNo = g_log.count();
-                    g_altAfterExpiry = true;
-                    g_state = STATE_ALTITUDE_ENTRY;
-                } else {
-                    g_state = STATE_WORKING_TIME_EXPIRED;
-                }
+                g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
             }
             if (btnR_veryLong) {
@@ -276,28 +274,22 @@ void loop() {
                 unsigned long dur = g_ft.stop();
                 g_log.addFlight(dur);
                 g_comms.sendFlight(g_selectedPilotId, dur);
-                if (g_comms.isF5K()) {
-                    g_altitudeM   = 0;
-                    g_altFlightNo = g_log.count();
-                    g_altAfterExpiry = false;
-                    g_state = STATE_ALTITUDE_ENTRY;
-                } else {
-                    g_state = STATE_WORKING_TIME_RUNNING;
-                }
+                g_state = STATE_WORKING_TIME_RUNNING;
             }
             break;
 
         case STATE_ALTITUDE_ENTRY: {
-            // WT expired while pilot was still entering altitude
-            if (!g_altAfterExpiry && g_wt.isExpired()) {
-                g_comms.sendAltitude(g_selectedPilotId, g_altFlightNo, g_altitudeM);
-                g_state = STATE_WORKING_TIME_EXPIRED;
-                break;
-            }
             if (btnR_held) {
-                // Confirm altitude and return
+                // Confirm altitude for this flight
                 g_comms.sendAltitude(g_selectedPilotId, g_altFlightNo, g_altitudeM);
-                g_state = g_altAfterExpiry ? STATE_WORKING_TIME_EXPIRED : STATE_WORKING_TIME_RUNNING;
+                if (g_altFlightNo < g_log.count()) {
+                    // Advance to next flight
+                    g_altFlightNo++;
+                    g_altitudeM = 0;
+                    // Stay in STATE_ALTITUDE_ENTRY — _needsRender detects flightNo change
+                } else {
+                    g_state = STATE_IDLE;
+                }
                 break;
             }
             if (btnR) {
@@ -328,10 +320,16 @@ void loop() {
             break;
 
         case STATE_WORKING_TIME_EXPIRED:
-            // Results stay on screen until R is pressed
+            // Results stay on screen; R advances to altitude entry (F5K) or IDLE
             if (btnR) {
                 g_tones.silence();
-                g_state = STATE_IDLE;
+                if (g_comms.isF5K() && g_log.count() > 0) {
+                    g_altFlightNo = 1;
+                    g_altitudeM   = 0;
+                    g_state = STATE_ALTITUDE_ENTRY;
+                } else {
+                    g_state = STATE_IDLE;
+                }
             }
             break;
 
