@@ -131,6 +131,15 @@ void TimerComms::sendAltitude(int pilotId, int flightNo, int altM) {
 #endif
 }
 
+void TimerComms::sendSelect(int pilotId) {
+#ifndef WOKWI_SIM
+    if (_state != COMMS_CONNECTED) return;
+    char buf[24];
+    snprintf(buf, sizeof(buf), "SELECT pilot=%d", pilotId);
+    _sendLine(buf);
+#endif
+}
+
 // ── Private — WiFi/TCP ────────────────────────────────────────────────────────
 
 #ifndef WOKWI_SIM

@@ -732,9 +732,7 @@ void UI::_drawRunningFull(bool flightActive,
     _drawCentered("WORKING TIME", DISPLAY_CX, Y_WT_LABEL, COL_GRAY, 1);
     _tft.drawFastHLine(DISPLAY_CX - DIV_HALF, Y_DIV1, DIV_HALF * 2, COL_DIMGRAY);
 
-    const char* flLabel = flightActive ? "FLIGHT ACTIVE"
-                        : (ft.elapsed() > 0 ? "LAST FLIGHT" : "NO FLIGHT");
-    _drawCentered(flLabel, DISPLAY_CX, Y_FL_LABEL, COL_GRAY, 1);
+    _drawCentered("FLIGHT TIME", DISPLAY_CX, Y_FL_LABEL, COL_GRAY, 1);
     _tft.drawFastHLine(DISPLAY_CX - DIV_HALF, Y_DIV2, DIV_HALF * 2, COL_DIMGRAY);
 
     _drawCentered(fmtMs(remMs, buf, sizeof(buf)), DISPLAY_CX, Y_WT_DIGITS, col, 3);
@@ -746,16 +744,14 @@ void UI::_drawRunningFull(bool flightActive,
     _drawFlightLog(log);
 #else
     // Flight time (large) at top - primary focus for caller
-    const char* flLabel = flightActive ? "FLIGHT"
-                        : (ft.elapsed() > 0 ? "LAST" : "FLIGHT");
-    _drawFontCentered(flLabel, WS_CX, WS_Y_FL_LABEL, COL_GRAY, &FreeSans12pt7b);
+    _drawFontCentered("FLIGHT TIME", WS_CX, WS_Y_FL_LABEL, COL_GRAY, &FreeSans12pt7b);
 
     unsigned long el = ft.elapsed();
     uint16_t flCol = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
     _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, flCol, &FreeMonoBold24pt7b);
 
-    // State indicator (FLY/WAIT) in middle
-    _drawFontCentered(flightActive ? "FLY" : "WAIT", WS_CX, WS_Y_STATE,
+    // State indicator (FLYING/WAIT) in middle
+    _drawFontCentered(flightActive ? "FLYING" : "WAIT", WS_CX, WS_Y_STATE,
                       flightActive ? COL_GREEN : COL_GRAY, &FreeSansBold18pt7b);
 
     // Flight log (3 best times) in middle
@@ -802,11 +798,9 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
     char buf[16];
 
 #ifdef WOKWI_SIM
-    // Update flight label
-    const char* flLabel = flightActive ? "FLIGHT ACTIVE"
-                        : (ft.elapsed() > 0 ? "LAST FLIGHT" : "NO FLIGHT");
+    // Update flight label (always "FLIGHT TIME")
     _tft.fillRect(DISPLAY_CX - 70, Y_FL_LABEL - 5, 140, 14, COL_BG);
-    _drawCentered(flLabel, DISPLAY_CX, Y_FL_LABEL, COL_GRAY, 1);
+    _drawCentered("FLIGHT TIME", DISPLAY_CX, Y_FL_LABEL, COL_GRAY, 1);
 
     // Update flight time
     unsigned long el = ft.elapsed();
@@ -818,17 +812,20 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
     _tft.fillRect(DISPLAY_CX - 80, Y_LOG_START - 5, 160, Y_LOG_STEP * 3 + 10, COL_BG);
     _drawFlightLog(log);
 #else
-    // Update flight label at top
-    const char* flLabel = flightActive ? "FLIGHT"
-                        : (ft.elapsed() > 0 ? "LAST" : "FLIGHT");
-    _gfx->fillRect(WS_CX - 80, WS_Y_FL_LABEL - 20, 160, 40, COL_BG);
-    _drawFontCentered(flLabel, WS_CX, WS_Y_FL_LABEL, COL_GRAY, &FreeSans12pt7b);
+    // Update flight label at top (always "FLIGHT TIME")
+    _gfx->fillRect(WS_CX - 110, WS_Y_FL_LABEL - 20, 220, 40, COL_BG);
+    _drawFontCentered("FLIGHT TIME", WS_CX, WS_Y_FL_LABEL, COL_GRAY, &FreeSans12pt7b);
 
     // Update flight time (large) at top
     unsigned long el = ft.elapsed();
     uint16_t col = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
     _gfx->fillRect(WS_CX - 120, WS_Y_FL_DIGITS - 35, 240, 70, COL_BG);
     _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, col, &FreeMonoBold24pt7b);
+
+    // Update state label (FLYING/WAIT) — only changes when flight state changes
+    _gfx->fillRect(WS_CX - 100, WS_Y_STATE - 25, 200, 50, COL_BG);
+    _drawFontCentered(flightActive ? "FLYING" : "WAIT", WS_CX, WS_Y_STATE,
+                      flightActive ? COL_GREEN : COL_GRAY, &FreeSansBold18pt7b);
 
     // Redraw flight log (new flight may have been recorded)
     _gfx->fillRect(WS_CX - 100, WS_Y_LOG_START - 10, 200, WS_Y_LOG_STEP * 3 + 20, COL_BG);

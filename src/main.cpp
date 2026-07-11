@@ -206,6 +206,7 @@ void loop() {
             }
             if (btnR_held) {
                 // Confirm pilot selection, return to idle ready to start
+                g_comms.sendSelect(g_selectedPilotId);
                 g_state = STATE_IDLE;
             }
             break;

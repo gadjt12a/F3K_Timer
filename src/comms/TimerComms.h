@@ -34,6 +34,7 @@ public:
 
     void sendFlight(int pilotId, unsigned long durationMs);
     void sendAltitude(int pilotId, int flightNo, int altM);
+    void sendSelect(int pilotId);
 
 private:
     CommsState _state         = COMMS_IDLE;
