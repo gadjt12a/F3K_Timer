@@ -26,6 +26,10 @@ static unsigned long g_settingsLastMs  = 0;    // tracks inactivity for auto-con
 static int  g_altitudeM   = 0;
 static int  g_altFlightNo = 0;  // 1-based index of flight being entered; 0 = not started
 
+// Task type: false = F3K (no altitude), true = F5K (altitude entry after round)
+static bool g_isF5K = false;
+static unsigned long g_taskSelectLastMs = 0;
+
 // Pilot selection (only used when connected to base station)
 static int  g_selectedPilotIdx = 0;
 static int  g_selectedPilotId  = 0;
@@ -47,6 +51,7 @@ static int           _lastCountdownN  = -1;
 static int           g_countdownN     = 0;
 static int           _lastAltitudeM   = -1;
 static int           _lastAltFlightNo = -1;
+static bool          _lastIsF5K       = false;
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
@@ -54,6 +59,7 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state == STATE_PILOT_SELECT)      return g_selectedPilotIdx != _lastPilotIdx;
     if (state == STATE_SCRATCH_CONFIRM)   return millis() >= _nextScratchMs;
     if (state == STATE_SETTINGS)          return g_wtMinutes != _lastWtMinutes;
+    if (state == STATE_TASK_SELECT)       return g_isF5K != _lastIsF5K;
     if (state == STATE_WORKING_TIME_RUNNING || state == STATE_FLIGHT_RUNNING) {
         // Update every 50ms for hundredths display
         if (millis() >= _nextTimeMs) return true;
@@ -70,7 +76,7 @@ static void _doRender(AppState state, int wtSecs) {
     const char* pilot = (g_selectedPilotName[0] != '\0') ? g_selectedPilotName : nullptr;
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
                 battPct, charging, pilot, g_comms.baseConnState(), g_countdownN,
-                g_altitudeM, g_altFlightNo, g_log.count());
+                g_altitudeM, g_altFlightNo, g_log.count(), g_isF5K);
     _lastState      = state;
     _lastWtSecs     = wtSecs;
     _lastWtMinutes  = g_wtMinutes;
@@ -79,6 +85,7 @@ static void _doRender(AppState state, int wtSecs) {
     _lastCountdownN  = g_countdownN;
     _lastAltitudeM   = g_altitudeM;
     _lastAltFlightNo = g_altFlightNo;
+    _lastIsF5K       = g_isF5K;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
@@ -148,7 +155,8 @@ void loop() {
     // ── Base station commands (processed before button handling) ──────────────
     if (g_comms.hasTaskUpdate()) {
         g_wtMinutes = g_comms.getTaskWtSeconds() / 60;
-        Serial.printf("[MAIN] Task update from base: %d min\n", g_wtMinutes);
+        g_isF5K     = g_comms.isF5K();
+        Serial.printf("[MAIN] Task update from base: %d min, %s\n", g_wtMinutes, g_isF5K ? "F5K" : "F3K");
     }
 
     if (g_comms.hasPilotList() &&
@@ -294,9 +302,16 @@ void loop() {
                 break;
             }
             if (btnR) {
-                g_altitudeM = min(g_altitudeM + 1, 999);
+                // Ones digit cycles 0→9→0; no-op at 100 (can't have 101m)
+                if (g_altitudeM < 100) {
+                    g_altitudeM = (g_altitudeM % 10 == 9) ? g_altitudeM - 9 : g_altitudeM + 1;
+                }
             } else if (btnL) {
-                g_altitudeM = min(g_altitudeM + 10, 999);
+                // Tens digit cycles 0→10→...→100→0; ones digit preserved (capped at 100)
+                int ones = g_altitudeM % 10;
+                int tens = (g_altitudeM / 10) * 10;
+                tens = (tens >= 100) ? 0 : tens + 10;
+                g_altitudeM = min(tens + ones, 100);
             }
             break;
         }
@@ -324,7 +339,7 @@ void loop() {
             // Results stay on screen; R advances to altitude entry (F5K) or IDLE
             if (btnR) {
                 g_tones.silence();
-                if (g_comms.isF5K() && g_log.count() > 0) {
+                if (g_isF5K && g_log.count() > 0) {
                     g_altFlightNo = 1;
                     g_altitudeM   = 0;
                     g_state = STATE_ALTITUDE_ENTRY;
@@ -348,9 +363,26 @@ void loop() {
             }
             if (changed) g_settingsLastMs = millis();
 
-            // R hold or timeout: confirm and exit
+            // R hold or timeout: save WT and advance to task-type page
             bool confirm = btnR_held ||
                            (millis() - g_settingsLastMs >= SETTINGS_TIMEOUT_MS);
+            if (confirm) {
+                g_taskSelectLastMs = millis();
+                g_state = STATE_TASK_SELECT;
+            }
+            break;
+        }
+
+        case STATE_TASK_SELECT: {
+            bool changed = false;
+            if (btnR || btnL) {
+                g_isF5K = !g_isF5K;
+                changed = true;
+            }
+            if (changed) g_taskSelectLastMs = millis();
+
+            bool confirm = btnR_held ||
+                           (millis() - g_taskSelectLastMs >= SETTINGS_TIMEOUT_MS);
             if (confirm) {
                 g_state = STATE_IDLE;
             }

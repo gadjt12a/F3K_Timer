@@ -1,90 +1,152 @@
 # F3K Timer
 
-A hand-held F3K (discus-launched glider) competition timer for a **caller** — the pilot's field assistant who coaches the pilot in real time.
+A hand-held competition timer for a **caller** — the pilot's field assistant who coaches the pilot in real time during F3K (discus-launched glider) and F5K rounds.
 
 ## Features
 
-- Working time countdown with visual arc indicator
+- Working time countdown with colour-coded arc (green → orange → red)
 - All times displayed with hundredths of a second (MM:SS.CC)
-- Flight timer (start/stop with button)
-- Flight log showing top 3 best times with traffic light colors:
+- Flight timer — start/stop with a single button press
+- Flight log showing best times with traffic-light ranking:
   - 1st best = Green
   - 2nd best = Orange
   - 3rd best = Yellow
   - Scratched = Red (strikethrough)
-- Audio alerts at key time thresholds (30s, 15s, 10-1s countdown)
-- Configurable working time (1-15 minutes)
-- Battery indicator
-- **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS commands, reports flights back
-- **Pilot selection UI** — driven by PILOTS command from base station
-- **Connection indicator** — idle screen shows BASE... (grey) while connecting, BASE OK (green) when live
+- Audio alerts at key time thresholds (30s, 15s, 10–1s countdown)
+- Configurable working time (1–15 minutes via settings)
+- **F3K / F5K task selection** — choose task type in settings; F5K enables post-round altitude entry
+- **Altitude entry (F5K)** — after time expires, enter launch altitude per flight with rollover dials:
+  - R = +1 m (ones digit, rolls 0 → 9 → 0)
+  - L = +10 m (tens digit, rolls 0 → 10 → … → 100 → 0)
+  - R hold = confirm altitude and advance to next flight
+- Battery indicator (% + charging state)
+- **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS/COUNT commands, reports flights back
+- **Pilot selection UI** — scrollable list driven by PILOTS command from base station
+- **10-second countdown arc** — green sweep during pre-round countdown from base
+- **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live
 
 ## Hardware
 
-**Target device:** Waveshare ESP32-S3-Touch-AMOLED-1.75C
-- 466x466 round AMOLED display
-- ESP32-S3 dual-core
-- ES8311 audio codec
-- AXP2101 power management
+**Target device:** Waveshare ESP32-S3-Touch-AMOLED-1.75C (SKU 33691)
+
+| Component | Detail |
+|-----------|--------|
+| SoC | ESP32-S3R8, dual-core LX7 @ 240 MHz |
+| Display | 1.75" AMOLED round, 466×466, CO5300 driver |
+| Audio | ES8311 codec via I2S |
+| Power management | AXP2101 PMIC (also provides L button via power-key IRQ) |
+| Battery | 3.7 V Li-Ion, MX1.25 connector |
+
+### Button layout (stopwatch orientation — buttons at 12 o'clock)
+
+| Physical button | Position | Role |
+|----------------|----------|------|
+| PWR (AXP2101) | Top-left | **L** — secondary: start WT only, scratch, settings adjust |
+| BOOT (GPIO0) | Top-right | **R** — primary: start/stop flight, confirm, navigate |
+
+> Do not hold R (BOOT) while powering on — GPIO0 held LOW at boot forces download mode.
+
+## State Machine
+
+```
+IDLE
+  R hold       → SETTINGS
+  R click      → FLIGHT_RUNNING  (starts WT + flight together)
+  L click      → WORKING_TIME_RUNNING  (WT only — wait for launch)
+
+WORKING_TIME_RUNNING
+  R click      → FLIGHT_RUNNING
+  L click      → SCRATCH_CONFIRM  (if flights recorded)
+  R hold 2s   → WORKING_TIME_EXPIRED  (abort)
+  WT expires  → WORKING_TIME_EXPIRED
+
+FLIGHT_RUNNING
+  R click      → WORKING_TIME_RUNNING  (stop & record flight)
+  R hold 2s   → WORKING_TIME_EXPIRED  (abort, discard flight)
+  WT expires  → WORKING_TIME_EXPIRED  (auto-record)
+
+SCRATCH_CONFIRM
+  R click      → WORKING_TIME_RUNNING  (confirmed)
+  2s timeout  → WORKING_TIME_RUNNING  (cancelled)
+
+WORKING_TIME_EXPIRED
+  R click      → ALTITUDE_ENTRY  (F5K, if flights exist)
+               → IDLE  (F3K)
+
+ALTITUDE_ENTRY  (F5K only)
+  R click      → +1 m  (ones digit, 0→9→0)
+  L click      → +10 m  (tens digit, 0→100→0)
+  R hold       → confirm altitude, next flight (or IDLE when done)
+
+SETTINGS  (page 1: working time)
+  R click      → +1 minute
+  L click      → −1 minute
+  R hold / 8s timeout → TASK_SELECT
+
+TASK_SELECT  (page 2: task type)
+  R or L click → toggle F3K / F5K
+  R hold / 8s timeout → IDLE
+
+PILOT_SELECT  (base station only)
+  R click      → next pilot
+  L click      → previous pilot
+  R hold       → confirm, → IDLE
+
+COUNTDOWN  (base station COUNT 10…1)
+  COUNT N      → display arc + beep
+  START        → WORKING_TIME_RUNNING + long tone
+```
 
 ## Base Station
 
-The timer connects as a WiFi client to the F3K base station AP (`F3K_BASE`). The base station is a Raspberry Pi 4 running `server.py` on port 8765. See the `F3K_Timer_Project` repo for the base station setup.
+The timer connects as a WiFi client to the F3K base station AP (`F3K_BASE`). The base station is a Raspberry Pi running `server.py` on port 8765. See the `F3K_Timer_Project` repo for setup.
 
 Network credentials are hardcoded in `include/config.h` — the timer AP is a closed, dedicated network.
 
 ## Simulation (Wokwi)
 
-You can run this project in simulation without the physical hardware.
+Run without physical hardware using the Wokwi VS Code extension.
 
 ### Prerequisites
 
 1. [VS Code](https://code.visualstudio.com/)
 2. [PlatformIO extension](https://platformio.org/install/ide?install=vscode)
-3. [Wokwi extension](https://docs.wokwi.com/vscode/getting-started) (free trial available)
+3. [Wokwi extension](https://docs.wokwi.com/vscode/getting-started)
 
-### Running the Simulation
+### Running
 
-1. Clone this repo:
-   ```
-   git clone https://github.com/gadjt12a/F3K_Timer.git
-   ```
-2. Open the folder in VS Code
-3. Wait for PlatformIO to install dependencies (automatic, may take a minute)
-4. Build the project:
-   - `Ctrl+Shift+P` → "PlatformIO: Build"
-   - Select the `wokwi` environment
-5. Start the simulator:
-   - `Ctrl+Shift+P` → "Wokwi: Start Simulator"
+1. Clone this repo and open in VS Code
+2. Wait for PlatformIO to install dependencies
+3. `Ctrl+Shift+P` → "PlatformIO: Build" → select `wokwi` environment
+4. `Ctrl+Shift+P` → "Wokwi: Start Simulator"
 
-### Simulation Controls
-
-| Button | Color | Action |
-|--------|-------|--------|
-| R (GPIO17) | Blue | Primary: Start/stop flight |
-| L (GPIO16) | Green | Secondary: Scratch, WT only start |
-
-**From Idle:**
-- **R click**: Start working time + flight together
-- **L click**: Start working time only (wait for launch)
-- **R hold**: Enter settings
-
-**During Round:**
-- **R click**: Start/stop flight
-- **L click**: Scratch last recorded flight
-- **R very long hold (2s)**: Abort round
-
-**Settings:**
-- **R click**: +1 minute
-- **L click**: -1 minute
-- **R hold** or timeout: Confirm and exit
+Buttons in sim: GPIO16 (green) = L, GPIO17 (blue) = R.
 
 ## Building for Hardware
 
-On Windows, `pio` is not on PATH — use the full PlatformIO path:
-
 ```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e waveshare --target upload --project-dir "C:\Kris\Projects\F3K_Timer_1"
+# Build and flash
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e waveshare --target upload --upload-port COM4 --project-dir "C:\Kris\Projects\F3K_Timer_1"
+
+# Serial monitor
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --environment waveshare --baud 115200 --project-dir "C:\Kris\Projects\F3K_Timer_1"
+```
+
+Flash mode: hold BOOT, tap RESET, release BOOT — device enumerates as USB serial on COM4.
+
+## Project Structure
+
+```
+include/
+  config.h          task types, timing constants, state enum
+  pin_config.h      all GPIO defines
+src/
+  main.cpp          setup(), loop(), state machine
+  timer/            WorkingTime, FlightTimer, FlightLog
+  display/          UI (round AMOLED + Wokwi sim paths), ArcRenderer
+  input/            Buttons (AXP2101 PWR key + GPIO0 BOOT)
+  audio/            Tones (I2S sine wave alerts)
+  comms/            TimerComms — WiFi TCP client to base station
 ```
 
 ## License

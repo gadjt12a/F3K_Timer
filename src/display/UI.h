@@ -32,7 +32,8 @@ public:
                 int                countdownN      = 0,         // 1-10: countdown to WT start
                 int                altitudeM       = 0,         // F5K altitude entry (m)
                 int                altFlightNo     = 0,         // which flight (1-based)
-                int                altTotalFlights = 0);        // total flights to enter
+                int                altTotalFlights = 0,
+                bool               isF5K           = false);   // task type (for task-select screen)        // total flights to enter
 
 private:
 #ifdef WOKWI_SIM
@@ -68,6 +69,8 @@ private:
 
     void _drawSettings(int minutes);
     void _drawSettingsInc(int minutes);
+    void _drawTaskSelect(bool isF5K);
+    void _drawTaskSelectInc(bool isF5K);
 
     void _drawFlightLog(const FlightLog& log,
                         int startY   = 0,

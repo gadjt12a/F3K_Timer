@@ -171,10 +171,15 @@ Buttons (hardware)            Buttons (Wokwi sim)
 
 **Button A — PWR button**
 - Physical position: top-left when device is rotated 90° CW (stopwatch orientation)
-- Read via AXP2101 power-key interrupt using `XPowersLib`
-- Short press = primary action (start/stop)
+- Read via AXP2101 PKEY interrupt using `XPowersLib`
 - Long press intentionally NOT intercepted — let AXP2101 handle power-off
-- Poll `pmu.isPekeyShortPressIRQ()` in `Buttons::update()`
+- Implementation in `Buttons::update()`:
+  - Enable all four PKEY IRQ types (SHORT, LONG, NEGATIVE, POSITIVE) so INTEN2 bits 0-3 are set
+  - Call `disableSleep()` on init — sleep mode suppresses PKEY events
+  - Read `getIrqStatus()` and check `irqStatus & 0x0F00` (INTSTS2 bits 0-3) directly,
+    bypassing the `intRegister[]` cache gate used by `isPekey*Irq()` helpers
+  - **200 ms cooldown** after each click — AXP2101 fires both NEGATIVE (press) and
+    POSITIVE (release) edges per button cycle; without a cooldown every tap registers twice
 
 **Button B — BOOT button (GPIO0)**
 - Physical position: top-right when device is rotated 90° CW (stopwatch orientation)
@@ -258,11 +263,23 @@ SCRATCH_CONFIRM
   → [WT expired]    → WORKING_TIME_EXPIRED
 
 WORKING_TIME_EXPIRED
-  → [R click]       → IDLE
+  → [R click]       → ALTITUDE_ENTRY (F5K mode, if flights recorded)
+  → [R click]       → IDLE (F3K mode or no flights)
 
-SETTINGS
+ALTITUDE_ENTRY  (F5K only — enter launch altitude per flight after round)
+  → [R click]       → ones digit +1m (rolls 0→9→0; no-op at 100m)
+  → [L click]       → tens digit +10m (rolls 0→10→…→100→0; ones preserved)
+  → [R hold]        → confirm altitude, advance to next flight (or IDLE when all done)
+  Max altitude 100m. Ones and tens roll independently — no carry between digits.
+
+SETTINGS  (page 1 of 2: working time)
   → [R click]       → +1 minute
   → [L click]       → -1 minute
+  → [R hold]        → TASK_SELECT (advance to page 2)
+  → [8s inactivity] → TASK_SELECT (auto-advance)
+
+TASK_SELECT  (page 2 of 2: task type)
+  → [R or L click]  → toggle F3K / F5K
   → [R hold]        → IDLE (confirm)
   → [8s inactivity] → IDLE (auto-confirm)
 ```
@@ -563,9 +580,21 @@ f3k-timer/
 
 ## Known Issues / Watch-outs
 
-1. **PWR via AXP2101** — read power-key via `pmu.isPekeyShortPressIRQ()` after calling
-   `pmu.clearIRQ()`. Do not `digitalRead` the PWR pin. Long-press power-off is handled
-   by AXP2101 hardware — do not intercept it in firmware.
+1. **PWR via AXP2101 — do NOT use `isPekey*Irq()` helpers or `setPowerKeyPressOnTime()`**
+   - The `isPekey*Irq()` helpers gate on a software `intRegister[]` cache that can
+     desync from hardware; use `getIrqStatus() & 0x0F00` directly instead.
+   - `setPowerKeyPressOnTime()` writes to AXP2101 register 0x27 which lives in
+     **battery-backed RAM** (survives reflash). Writing 0x00 to this register corrupts
+     the SHORT_IRQ state machine. Corrupted registers also silently break battery % ADC.
+     **Never call `setPowerKeyPressOnTime()`** — leave register 0x27 at OTP defaults.
+   - If L button stops working and battery % reads 0: physical battery disconnection
+     (30+ seconds, draining AXP2101 capacitors) forces OTP reload and restores all registers.
+   - `_pmu.reset()` (`setRegisterBit(0x10, 1)`) does NOT cause an SoC power cycle on
+     this hardware — it has no observable effect.
+   - AXP2101 fires BOTH NEGATIVE (press) and POSITIVE (release) PKEY IRQs per button
+     cycle. Without a cooldown, each tap registers twice. Use a 200ms `_lastAClickMs`
+     guard in `Buttons::update()`.
+   - Long-press power-off is handled by AXP2101 hardware — do not intercept it in firmware.
 
 2. **BOOT (GPIO0) as Button B** — GPIO0 is a strapping pin. Held LOW at power-on =
    download mode. Enable with `pinMode(0, INPUT_PULLUP)` in `setup()` only. A brief

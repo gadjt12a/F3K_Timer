@@ -30,6 +30,7 @@ private:
     bool _prevA = false, _prevB = false;
     unsigned long _pressedAms = 0, _pressedBms = 0;
     unsigned long _lastBChangeMs = 0;  // debounce tracking
+    unsigned long _lastAClickMs  = 0;  // cooldown: suppress duplicate PKEY IRQs per press
     bool _holdFiredA = false, _holdFiredB = false;
     bool _veryLongFiredA = false, _veryLongFiredB = false;
     bool _clickA = false, _clickB = false;

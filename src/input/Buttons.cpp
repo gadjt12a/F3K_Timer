@@ -7,39 +7,32 @@ void Buttons::begin() {
     pinMode(BTN_B_SIM, INPUT_PULLUP);
     Serial.println("[BTN] Wokwi GPIO init");
 #else
-    // AXP2101 for Button A (PWR key) — also initializes Wire
     if (!_pmu.begin(Wire, ADDR_AXP2101, IIC_SDA, IIC_SCL)) {
         Serial.println("[BTN] AXP2101 init FAILED");
     } else {
+        // Prevent sleep mode from suppressing PKEY events.
+        _pmu.disableSleep();
+
         _pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
-        _pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
+        // Enable all four PKEY IRQ types. In update() we check INTSTS2 bits
+        // 0-3 directly from getIrqStatus() so any PKEY detector fires a click
+        // — including NEGATIVE (button press edge) which gives instant response
+        // for quick taps like altitude entry without waiting for PONTIME.
+        _pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ    |
+                       XPOWERS_AXP2101_PKEY_LONG_IRQ      |
+                       XPOWERS_AXP2101_PKEY_NEGATIVE_IRQ  |
+                       XPOWERS_AXP2101_PKEY_POSITIVE_IRQ);
         _pmu.clearIrqStatus();
 
-        // Enable ALL potentially relevant power rails for audio subsystem
-        // Different Waveshare boards use different rails - enable all candidates
-        _pmu.setALDO2Voltage(3300);
-        _pmu.enableALDO2();
-        Serial.println("[BTN] AXP2101 ALDO2 enabled (3.3V)");
+        // Enable power rails for audio subsystem
+        _pmu.setALDO2Voltage(3300); _pmu.enableALDO2();
+        _pmu.setALDO3Voltage(3300); _pmu.enableALDO3();
+        _pmu.setALDO4Voltage(3300); _pmu.enableALDO4();
+        _pmu.setBLDO1Voltage(3300); _pmu.enableBLDO1();
+        _pmu.setBLDO2Voltage(3300); _pmu.enableBLDO2();
 
-        _pmu.setALDO3Voltage(3300);
-        _pmu.enableALDO3();
-        Serial.println("[BTN] AXP2101 ALDO3 enabled (3.3V)");
-
-        _pmu.setALDO4Voltage(3300);
-        _pmu.enableALDO4();
-        Serial.println("[BTN] AXP2101 ALDO4 enabled (3.3V)");
-
-        _pmu.setBLDO1Voltage(3300);
-        _pmu.enableBLDO1();
-        Serial.println("[BTN] AXP2101 BLDO1 enabled (3.3V)");
-
-        _pmu.setBLDO2Voltage(3300);
-        _pmu.enableBLDO2();
-        Serial.println("[BTN] AXP2101 BLDO2 enabled (3.3V)");
-
-        Serial.println("[BTN] AXP2101 power key ready");
+        Serial.println("[BTN] AXP2101 ready");
     }
-    // GPIO0 for Button B (BOOT button)
     pinMode(BTN_BOOT, INPUT_PULLUP);
     Serial.println("[BTN] GPIO0 BOOT button ready");
 #endif
@@ -53,14 +46,16 @@ void Buttons::update() {
     bool rawA = (digitalRead(BTN_A_SIM) == LOW);
     bool rawB = (digitalRead(BTN_B_SIM) == LOW);
 #else
-    // Button A: AXP2101 power key short press (fires as event, not level)
+    // Read INTSTS2 directly from getIrqStatus() return bits[15:8].
+    // Checking bits 0-3 catches any PKEY event (POSITIVE, NEGATIVE, LONG,
+    // SHORT) without the intRegister[] gate, so NEGATIVE (button pressed)
+    // fires a click immediately — no PONTIME wait required.
     bool rawA = false;
-    _pmu.getIrqStatus();
-    if (_pmu.isPekeyShortPressIrq()) {
+    uint32_t irqStatus = _pmu.getIrqStatus();
+    if (irqStatus & 0x0F00) {
         rawA = true;
         _pmu.clearIrqStatus();
     }
-    // Button B: GPIO0 (BOOT) — active LOW
     bool rawB = (digitalRead(BTN_BOOT) == LOW);
 #endif
 
@@ -84,10 +79,11 @@ void Buttons::update() {
     }
     _prevA = rawA;
 #else
-    // AXP2101: IRQ fires once per short press — treat as click immediately
-    // Long-press handled by AXP2101 hardware (power off)
-    if (rawA) {
-        _clickA = true;
+    // 350ms cooldown: AXP2101 fires both NEGATIVE (press) and POSITIVE (release)
+    // edges, which would register two clicks per tap. Only accept the first.
+    if (rawA && (now - _lastAClickMs >= 200)) {
+        _clickA      = true;
+        _lastAClickMs = now;
         Serial.println("[BTN] A (PWR) clicked");
     }
 #endif
@@ -97,7 +93,6 @@ void Buttons::update() {
     _clickB = false;
     _veryLongB = false;
 
-    // Debounce: only register state change after DEBOUNCE_MS
     bool stableB = _prevB;
     if (rawB != _prevB) {
         if (now - _lastBChangeMs >= DEBOUNCE_MS) {
@@ -107,12 +102,10 @@ void Buttons::update() {
     }
 
     if (stableB && !_prevB) {
-        // Falling edge — start timing
         _pressedBms = now;
         _holdFiredB = false;
         _veryLongFiredB = false;
     } else if (stableB && _prevB) {
-        // Held — fire hold once at threshold, very long at 2s
         if (!_holdFiredB && (now - _pressedBms >= LONG_PRESS_MS)) {
             _holdB      = true;
             _holdFiredB = true;
@@ -122,7 +115,6 @@ void Buttons::update() {
             _veryLongFiredB = true;
         }
     } else if (!stableB && _prevB) {
-        // Rising edge — short press fires click only if hold never fired
         if (!_holdFiredB) {
             _clickB = true;
             Serial.println("[BTN] B (BOOT) clicked");
@@ -145,7 +137,7 @@ int Buttons::getBatteryPercent() {
 #ifdef WAVESHARE_HW
     return _pmu.getBatteryPercent();
 #else
-    return 75;  // Stub value for simulation
+    return 75;
 #endif
 }
 
@@ -153,6 +145,6 @@ bool Buttons::isCharging() {
 #ifdef WAVESHARE_HW
     return _pmu.isCharging();
 #else
-    return false;  // Stub for simulation
+    return false;
 #endif
 }

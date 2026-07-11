@@ -462,7 +462,8 @@ void UI::render(AppState       state,
                 int                countdownN,
                 int                altitudeM,
                 int                altFlightNo,
-                int                altTotalFlights)
+                int                altTotalFlights,
+                bool               isF5K)
 {
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
@@ -553,13 +554,16 @@ void UI::render(AppState       state,
             else               _drawSettingsInc(wtMinutes);
             break;
 
+        case STATE_TASK_SELECT:
+            if (screenChanged) _drawTaskSelect(isF5K);
+            else               _drawTaskSelectInc(isF5K);
+            break;
+
         case STATE_ALTITUDE_ENTRY:
-            if (screenChanged || altFlightNo != _prevAltFlightNo) {
-                if (!screenChanged) _clearScreen();
-                _drawAltitudeEntry(altitudeM, altFlightNo, altTotalFlights);
-            } else {
-                _drawAltitudeEntryInc(altitudeM);
-            }
+            // Always full redraw — ensures number updates even if incremental
+            // clear region doesn't match the font's actual bounding box.
+            if (!screenChanged) _clearScreen();
+            _drawAltitudeEntry(altitudeM, altFlightNo, altTotalFlights);
             _prevAltFlightNo = altFlightNo;
             break;
 
@@ -854,29 +858,29 @@ void UI::_drawExpired(const FlightLog& log) {
 
 void UI::_drawAltitudeEntry(int altM, int flightNo, int totalFlights) {
     char altBuf[8], hdrBuf[24];
-    snprintf(altBuf, sizeof(altBuf), "%d", altM);
+    snprintf(altBuf, sizeof(altBuf), "%03d", altM);
     snprintf(hdrBuf, sizeof(hdrBuf), "FLIGHT %d of %d", flightNo, totalFlights);
 
 #ifdef WOKWI_SIM
-    _drawCentered(hdrBuf,          DISPLAY_CX, 35,  COL_YELLOW, 1);
-    _drawCentered("ALTITUDE",      DISPLAY_CX, 60,  COL_GRAY,   1);
-    _drawCentered(altBuf,          DISPLAY_CX, 150, COL_WHITE,  5);
-    _drawCentered("m",             DISPLAY_CX, 195, COL_GRAY,   2);
-    _drawCentered("R=+1  L=+10",  DISPLAY_CX, 245, COL_WHITE,  1);
-    _drawCentered("HOLD R = OK",  DISPLAY_CX, 265, COL_GRAY,   1);
+    _drawCentered(hdrBuf,           DISPLAY_CX, 35,  COL_YELLOW, 1);
+    _drawCentered("ALTITUDE",       DISPLAY_CX, 60,  COL_GRAY,   1);
+    _drawCentered(altBuf,           DISPLAY_CX, 150, COL_WHITE,  5);
+    _drawCentered("m",              DISPLAY_CX, 195, COL_GRAY,   2);
+    _drawCentered("L=+10  R=+1",   DISPLAY_CX, 245, COL_WHITE,  1);
+    _drawCentered("HOLD R = OK",   DISPLAY_CX, 265, COL_GRAY,   1);
 #else
     _drawFontCentered(hdrBuf,                  WS_CX, 75,  COL_ORANGE,    &FreeSans12pt7b);
     _drawFontCentered("ALTITUDE",              WS_CX, 120, COL_GRAY,      &FreeSans9pt7b);
     _drawFontCentered(altBuf,                  WS_CX, 240, COL_WHITE,     &FreeMonoBold24pt7b);
     _drawFontCentered("m",                     WS_CX, 300, COL_GRAY,      &FreeSansBold18pt7b);
-    _drawFontCentered("R = +1m   L = +10m",    WS_CX, 370, COL_WHITE,     &FreeSans12pt7b);
+    _drawFontCentered("L = +10m   R = +1m",    WS_CX, 370, COL_WHITE,     &FreeSans12pt7b);
     _drawFontCentered("HOLD R = CONFIRM",      WS_CX, 408, COL_DIMGRAY,   &FreeSans9pt7b);
 #endif
 }
 
 void UI::_drawAltitudeEntryInc(int altM) {
     char buf[8];
-    snprintf(buf, sizeof(buf), "%d", altM);
+    snprintf(buf, sizeof(buf), "%03d", altM);
 
 #ifdef WOKWI_SIM
     _tft.fillRect(DISPLAY_CX - 55, 115, 110, 55, COL_BG);
@@ -968,6 +972,35 @@ void UI::_drawSettingsInc(int minutes) {
         uint16_t col = (minutes == presets[i]) ? COL_GREEN : COL_DIMGRAY;
         _drawFontCentered(labels[i], x, WS_CY + 110, col, &FreeSansBold18pt7b);
     }
+#endif
+}
+
+// ── Task select (settings page 2) ────────────────────────────────────────────
+
+void UI::_drawTaskSelect(bool isF5K) {
+    const char* label = isF5K ? "F5K" : "F3K";
+#ifdef WOKWI_SIM
+    _drawCentered("TASK TYPE",       DISPLAY_CX, 35,  COL_GRAY,    1);
+    _drawCentered(label,             DISPLAY_CX, 150, COL_WHITE,   5);
+    _drawCentered("R/L = TOGGLE",    DISPLAY_CX, 235, COL_WHITE,   1);
+    _drawCentered("hold R = confirm", DISPLAY_CX, 255, COL_GRAY,   1);
+    _drawCentered("(auto 8s)",        DISPLAY_CX, 275, COL_DIMGRAY, 1);
+#else
+    _drawFontCentered("TASK TYPE",       WS_CX, 100, COL_GRAY,      &FreeSans12pt7b);
+    _drawFontCentered(label,             WS_CX, WS_CY, COL_WHITE,   &FreeSansBold24pt7b);
+    _drawFontCentered("R / L  =  TOGGLE", WS_CX, 370, COL_WHITE,   &FreeSans12pt7b);
+    _drawFontCentered("HOLD R = OK",     WS_CX, 408, COL_DIMGRAY,  &FreeSans9pt7b);
+#endif
+}
+
+void UI::_drawTaskSelectInc(bool isF5K) {
+    const char* label = isF5K ? "F5K" : "F3K";
+#ifdef WOKWI_SIM
+    _tft.fillRect(DISPLAY_CX - 55, 115, 110, 55, COL_BG);
+    _drawCentered(label, DISPLAY_CX, 150, COL_WHITE, 5);
+#else
+    _gfx->fillRect(WS_CX - 80, WS_CY - 50, 160, 80, COL_BG);
+    _drawFontCentered(label, WS_CX, WS_CY, COL_WHITE, &FreeSansBold24pt7b);
 #endif
 }
 

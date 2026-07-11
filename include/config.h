@@ -46,6 +46,7 @@ enum AppState : uint8_t {
     STATE_SCRATCH_CONFIRM,
     STATE_WORKING_TIME_EXPIRED,
     STATE_SETTINGS,
+    STATE_TASK_SELECT,          // settings page 2: choose F3K or F5K task type
     STATE_PILOT_SELECT,         // connected to base: choose pilot before each round
     STATE_COUNTDOWN,            // base sent COUNT 10..1: green arc countdown to WT start
     STATE_ALTITUDE_ENTRY        // F5K only: enter altitude (m) after each flight
