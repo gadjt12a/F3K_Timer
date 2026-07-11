@@ -22,6 +22,7 @@ void Buttons::begin() {
                        XPOWERS_AXP2101_PKEY_NEGATIVE_IRQ  |
                        XPOWERS_AXP2101_PKEY_POSITIVE_IRQ);
         _pmu.clearIrqStatus();
+        _startupIgnoreA = true;  // discard the POSITIVE IRQ from the power-on press
 
         // Enable power rails for audio subsystem
         _pmu.setALDO2Voltage(3300); _pmu.enableALDO2();
@@ -54,7 +55,12 @@ void Buttons::update() {
     if (irqStatus & 0x0F00) {
         _pmu.clearIrqStatus();
         if (irqStatus & 0x0100) {
-            rawA = true;
+            if (_startupIgnoreA) {
+                _startupIgnoreA = false;
+                Serial.println("[BTN] A (PWR) power-on release ignored");
+            } else {
+                rawA = true;
+            }
         }
     }
     bool rawB = (digitalRead(BTN_BOOT) == LOW);
