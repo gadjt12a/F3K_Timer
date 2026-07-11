@@ -51,14 +51,15 @@ private:
     bool _hasCountdown    = false;
     int  _countdownN      = 0;
 
-    unsigned long _budgetStartMs    = 0;  // start of current 5-min connect window
-    unsigned long _connectStartMs   = 0;  // start of current WiFi attempt (60s each)
-    unsigned long _lastPingMs       = 0;
-    unsigned long _lastRxMs         = 0;
-    unsigned long _lastTcpAttemptMs = 0;
+    unsigned long _budgetStartMs       = 0;  // start of current 5-min connect window
+    unsigned long _connectStartMs      = 0;  // start of current WiFi attempt (60s each)
+    unsigned long _lastPingMs          = 0;
+    unsigned long _lastRxMs            = 0;
+    unsigned long _lastTcpAttemptMs    = 0;
+    unsigned long _lastWifiStatusLogMs = 0;
 
     static const unsigned long CONNECT_BUDGET_MS     = 300000; // 5 min total before giving up
-    static const unsigned long WIFI_ATTEMPT_MS       = 60000;  // restart WiFi every 60s within budget
+    static const unsigned long WIFI_ATTEMPT_MS       = 30000;  // restart WiFi every 30s within budget
     static const unsigned long TCP_RETRY_INTERVAL_MS = 5000;
     static const unsigned long PING_INTERVAL_MS      = 30000;
     static const unsigned long RX_TIMEOUT_MS         = 90000;  // no PONG in 90s = dead socket

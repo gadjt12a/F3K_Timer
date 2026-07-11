@@ -14,6 +14,12 @@ static WiFiClient _tcp;
 void TimerComms::begin() {
 #ifndef WOKWI_SIM
     Serial.println("[COMMS] Starting WiFi connect to " WIFI_SSID);
+    // Full OFF→STA cycle clears any residual WiFi stack state left by a firmware
+    // flash reset (RTS/EN toggle). Without this, the stack can get stuck in an
+    // intermediate state and never scan for the AP.
+    WiFi.persistent(false);  // RAM-only: skip stale NVS channel/BSSID cache
+    WiFi.mode(WIFI_OFF);
+    delay(100);
     WiFi.mode(WIFI_STA);
     // Disable WiFi modem sleep. With sleep on (the default), the radio dozes during
     // quiet periods (e.g. the prep countdown) and drops the TCP link ~1 min in, forcing
@@ -44,14 +50,22 @@ void TimerComms::update() {
                 _state = COMMS_FAILED;
                 break;
             }
+            // Log WiFi status every 10s so we can see what the stack is doing
+            if (WiFi.status() != WL_CONNECTED && now - _lastWifiStatusLogMs >= 10000) {
+                Serial.printf("[COMMS] WiFi status=%d elapsed=%lus\n",
+                              (int)WiFi.status(), (now - _connectStartMs) / 1000);
+                _lastWifiStatusLogMs = now;
+            }
             // Restart WiFi every 60s if still not associated
             if (WiFi.status() != WL_CONNECTED && now - _connectStartMs > WIFI_ATTEMPT_MS) {
                 Serial.printf("[COMMS] WiFi attempt timeout — retrying (%lus budget remaining)\n",
                               (CONNECT_BUDGET_MS - (now - _budgetStartMs)) / 1000);
                 _lastTcpAttemptMs = 0;
-                WiFi.disconnect();
-                WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+                WiFi.mode(WIFI_OFF);
+                delay(100);
+                WiFi.mode(WIFI_STA);
                 WiFi.setSleep(false);
+                WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
                 _connectStartMs = now;
                 break;
             }
@@ -172,6 +186,11 @@ void TimerComms::_parseLine(const char* line) {
     if (strncmp(line, "ASSIGN id=", 10) == 0) {
         _timerId = atoi(line + 10);
         Serial.printf("[COMMS] Assigned timer ID: %d\n", _timerId);
+        // Send PING immediately so the base's ping timer resets now rather than
+        // waiting 30s — guards against the base holding a stale last-ping timestamp
+        // from a previous session and firing ping_timeout before our first scheduled PING.
+        _sendLine("PING");
+        _lastPingMs = millis();
         _flushPending();  // send any messages queued while we were disconnected
 
     } else if (strncmp(line, "TASK wt=", 8) == 0) {
