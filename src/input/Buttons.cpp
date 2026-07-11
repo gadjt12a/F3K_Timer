@@ -22,11 +22,6 @@ void Buttons::begin() {
                        XPOWERS_AXP2101_PKEY_NEGATIVE_IRQ  |
                        XPOWERS_AXP2101_PKEY_POSITIVE_IRQ);
         _pmu.clearIrqStatus();
-        // Suppress A clicks for 2s after boot. The power-on button press generates
-        // a POSITIVE (release) IRQ that can arrive at any point during or after setup
-        // depending on how long the user holds the button. A single-event flag is
-        // fragile because setup length varies; a time window is more reliable.
-        _startupIgnoreUntilMs = millis() + 2000;
 
         // Enable power rails for audio subsystem
         _pmu.setALDO2Voltage(3300); _pmu.enableALDO2();
@@ -50,6 +45,20 @@ void Buttons::update() {
     bool rawA = (digitalRead(BTN_A_SIM) == LOW);
     bool rawB = (digitalRead(BTN_B_SIM) == LOW);
 #else
+    // On the very first update() call, flush any PKEY IRQs that accumulated
+    // during setup() (power-on button release, spurious events) and open a
+    // 300ms window for stragglers. The window starts here — not in begin() —
+    // because setup() can take 2-3s, which would expire a begin()-time window
+    // before the loop even starts.
+    if (!_firstUpdateDone) {
+        _firstUpdateDone = true;
+        if (_pmu.getIrqStatus() & 0x0F00) {
+            _pmu.clearIrqStatus();
+            _startupIgnoreUntilMs = millis() + 300;
+            Serial.println("[BTN] boot-time PKEY events flushed");
+        }
+    }
+
     // Read INTSTS2 directly from getIrqStatus() return bits[15:8].
     // Clear on any PKEY event (0x0F00) but only register a click on POSITIVE
     // (0x0100 = _BV(8) = release edge), so holding L to power off never
