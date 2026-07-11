@@ -20,10 +20,13 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
   - L = +10 m (tens digit, rolls 0 → 10 → … → 100 → 0)
   - R hold = confirm altitude and advance to next flight
 - Battery indicator (% + charging state)
-- **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS/COUNT commands, reports flights back
-- **Pilot selection UI** — scrollable list driven by PILOTS command from base station
+- **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS/COUNT commands, reports FLIGHT/ALTITUDE/SELECT back; queues messages when disconnected and flushes on reconnect
+- **Pilot selection UI** — scrollable list driven by PILOTS command from base station; SELECT sent on confirm
 - **10-second countdown arc** — green sweep during pre-round countdown from base
-- **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live
+- **Timer ID display** — after ASSIGN, shows `T1` / `T2` etc. bold green on idle screen between battery indicator and GLIDE title
+- **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live; BASE OK replaced by pilot name once a pilot is selected
+- **NVS round history** — stores last 2 rounds (discipline, flight times, F5K altitudes) to ESP32 NVS; each flight written immediately so data survives power loss mid-round; accessible via `STATE_HISTORY` from the expired screen
+- **Pilot decouple** — timer clears pilot binding automatically when returning to idle after a completed round
 
 ## Hardware
 
@@ -71,12 +74,18 @@ SCRATCH_CONFIRM
 
 WORKING_TIME_EXPIRED
   R click      → ALTITUDE_ENTRY  (F5K, if flights exist)
-               → IDLE  (F3K)
+               → IDLE  (F3K, clears pilot binding)
+  L click      → HISTORY  (browse last round in NVS)
 
 ALTITUDE_ENTRY  (F5K only)
   R click      → +1 m  (ones digit, 0→9→0)
   L click      → +10 m  (tens digit, 0→100→0)
-  R hold       → confirm altitude, next flight (or IDLE when done)
+  R hold       → confirm altitude, next flight (or IDLE when done; IDLE clears pilot binding)
+
+HISTORY  (NVS round review)
+  R click      → switch to slot 0 (current round)
+  L click      → switch to slot 1 (previous round)
+  R hold       → IDLE
 
 SETTINGS  (page 1: working time)
   R click      → +1 minute
@@ -138,15 +147,15 @@ Flash mode: hold BOOT, tap RESET, release BOOT — device enumerates as USB seri
 
 ```
 include/
-  config.h          task types, timing constants, state enum
+  config.h          task types, timing constants, AppState enum (incl. STATE_HISTORY)
   pin_config.h      all GPIO defines
 src/
   main.cpp          setup(), loop(), state machine
-  timer/            WorkingTime, FlightTimer, FlightLog
+  timer/            WorkingTime, FlightTimer, FlightLog, RoundHistory (NVS)
   display/          UI (round AMOLED + Wokwi sim paths), ArcRenderer
   input/            Buttons (AXP2101 PWR key + GPIO0 BOOT)
   audio/            Tones (I2S sine wave alerts)
-  comms/            TimerComms — WiFi TCP client to base station
+  comms/            TimerComms — WiFi TCP client; pending ring buffer for offline messages
 ```
 
 ## License
