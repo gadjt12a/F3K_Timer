@@ -4,6 +4,7 @@
 #include "timer/WorkingTime.h"
 #include "timer/FlightTimer.h"
 #include "timer/FlightLog.h"
+#include "timer/RoundHistory.h"
 
 #ifdef WOKWI_SIM
 #include <Adafruit_GFX.h>
@@ -27,13 +28,16 @@ public:
                 int                wtMinutes       = 10,
                 int                batteryPct      = -1,
                 bool               isCharging      = false,
-                const char*        pilotName       = nullptr,   // selected pilot (pilot select + running)
+                const char*        pilotName       = nullptr,
                 BaseConnState      connState       = BASE_DISCONNECTED,
-                int                countdownN      = 0,         // 1-10: countdown to WT start
-                int                altitudeM       = 0,         // F5K altitude entry (m)
-                int                altFlightNo     = 0,         // which flight (1-based)
+                int                countdownN      = 0,
+                int                altitudeM       = 0,
+                int                altFlightNo     = 0,
                 int                altTotalFlights = 0,
-                bool               isF5K           = false);   // task type (for task-select screen)        // total flights to enter
+                bool               isF5K           = false,
+                int                timerId         = -1);
+
+    void renderHistory(int slot, const HistRound& hist);
 
 private:
 #ifdef WOKWI_SIM
@@ -63,7 +67,9 @@ private:
     void _updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const FlightLog& log);
 
     void _drawIdle(BaseConnState connState = BASE_DISCONNECTED,
-                  const char* pilotName = nullptr);
+                  const char* pilotName = nullptr,
+                  int timerId = -1);
+    void _drawHistory(int slot, const HistRound& hist);
     void _drawPilotSelect(const char* pilotName);
     void _drawExpired(const FlightLog& log);
 

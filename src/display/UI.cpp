@@ -28,6 +28,8 @@ static const uint16_t COL_ORANGE  = C565(0xFF, 0x88, 0x00);
 static const uint16_t COL_YELLOW  = C565(0xFF, 0xDD, 0x00);
 static const uint16_t COL_GREEN   = C565(0x00, 0xC8, 0x00);
 
+static const uint16_t COL_FUCHSIA = C565(0xFF, 0x40, 0xFF);
+
 static const uint16_t COL_ARC_GREEN  = C565(0x00, 0xC8, 0x00);
 static const uint16_t COL_ARC_ORANGE = C565(0xFF, 0x88, 0x00);
 static const uint16_t COL_ARC_RED    = C565(0xFF, 0x20, 0x20);
@@ -463,7 +465,8 @@ void UI::render(AppState       state,
                 int                altitudeM,
                 int                altFlightNo,
                 int                altTotalFlights,
-                bool               isF5K)
+                bool               isF5K,
+                int                timerId)
 {
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
@@ -484,7 +487,7 @@ void UI::render(AppState       state,
         case STATE_IDLE:
             if (screenChanged || connChanged) {
                 if (connChanged && !screenChanged) _clearScreen();
-                _drawIdle(connState, pilotName);
+                _drawIdle(connState, pilotName, timerId);
                 if (batteryPct >= 0) _drawBattery(batteryPct, isCharging);
                 _prevBatteryPct = batteryPct;
             } else if (batteryPct >= 0 && batteryPct != _prevBatteryPct) {
@@ -667,7 +670,7 @@ void UI::_drawBattery(int pct, bool charging) {
 
 // ── Idle ──────────────────────────────────────────────────────────────────────
 
-void UI::_drawIdle(BaseConnState connState, const char* pilotName) {
+void UI::_drawIdle(BaseConnState connState, const char* pilotName, int timerId) {
 #ifdef WOKWI_SIM
     _drawCentered("GLIDE",            DISPLAY_CX, 100, COL_WHITE, 5);
     _drawCentered("TIMER",            DISPLAY_CX, 152, COL_GRAY,  2);
@@ -678,23 +681,29 @@ void UI::_drawIdle(BaseConnState connState, const char* pilotName) {
     // Subtle outer ring as decorative bezel
     ws_fillRing(_gfx, WS_CX, WS_CY, 225, 218, COL_DIMGRAY);
 
-    // Main title with FreeFont
+    // Timer ID — shown between battery and GLIDE when base has assigned an ID
+    if (timerId >= 0) {
+        char tidBuf[6];
+        snprintf(tidBuf, sizeof(tidBuf), "T%d", timerId);
+        _drawFontCentered(tidBuf, WS_CX, 130, COL_GREEN, &FreeSansBold24pt7b);
+    }
+
+    // Main title
     _drawFontCentered("GLIDE", WS_CX, 190, COL_WHITE, &FreeSansBold24pt7b);
     _drawFontCentered("TIMER", WS_CX, 240, COL_GRAY, &FreeSansBold18pt7b);
 
-    // Hints with smaller font
+    // Hints
     _drawFontCentered("R = FLY + WT", WS_CX, 310, COL_WHITE, &FreeSans12pt7b);
     _drawFontCentered("L = WT ONLY", WS_CX, 340, COL_WHITE, &FreeSans12pt7b);
     _drawFontCentered("R(hold) = SET", WS_CX, 385, COL_DIMGRAY, &FreeSans9pt7b);
 
-    // Base station connection indicator (outer ring, near bottom edge, r~182 from centre)
+    // Base station status at bottom
     if (connState == BASE_CONNECTED) {
         const char* label = (pilotName && pilotName[0]) ? pilotName : "BASE OK";
         _drawFontCentered(label, WS_CX, 415, COL_GREEN, &FreeSans9pt7b);
     } else if (connState == BASE_CONNECTING) {
         _drawFontCentered("BASE...", WS_CX, 415, COL_DIMGRAY, &FreeSans9pt7b);
     }
-    // BASE_DISCONNECTED: show nothing — standalone mode is normal
 #endif
 }
 
@@ -1149,4 +1158,55 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
 #endif
         shown++;
     }
+}
+
+// ── Round history (NVS) ───────────────────────────────────────────────────────
+
+void UI::renderHistory(int slot, const HistRound& hist) {
+    _clearScreen();
+    _drawHistory(slot, hist);
+#ifndef WOKWI_SIM
+    _gfx->flush();
+#endif
+}
+
+void UI::_drawHistory(int slot, const HistRound& hist) {
+#ifndef WOKWI_SIM
+    ws_fillRing(_gfx, WS_CX, WS_CY, 225, 218, COL_DIMGRAY);
+
+    const char* title = (slot == 0) ? "THIS ROUND" : "LAST ROUND";
+    _drawFontCentered(title, WS_CX, 65, COL_WHITE, &FreeSansBold18pt7b);
+
+    if (!hist.valid || hist.count == 0) {
+        _drawFontCentered("No data saved", WS_CX, 220, COL_DIMGRAY, &FreeSans12pt7b);
+    } else {
+        bool isF5K = (strncmp(hist.discipline, "F5K", 3) == 0);
+        _drawFontCentered(hist.discipline, WS_CX, 110,
+                          isF5K ? COL_FUCHSIA : COL_ORANGE, &FreeSansBold18pt7b);
+
+        const int step    = 38;
+        const int maxShow = 8;
+        const int startY  = 155;
+        for (int i = 0; i < hist.count && i < maxShow; i++) {
+            char timeBuf[16]; fmtMs(hist.flightMs[i], timeBuf, sizeof(timeBuf));
+            char row[32];
+            if (isF5K && hist.altitudeM[i] > 0) {
+                snprintf(row, sizeof(row), "%d. %s  %03dm",
+                         i + 1, timeBuf, (int)hist.altitudeM[i]);
+            } else {
+                snprintf(row, sizeof(row), "%d. %s", i + 1, timeBuf);
+            }
+            _drawFontCentered(row, WS_CX, startY + i * step,
+                              COL_WHITE, &FreeMonoBold18pt7b);
+        }
+        if (hist.count > maxShow) {
+            char more[16];
+            snprintf(more, sizeof(more), "+%d more", hist.count - maxShow);
+            _drawFontCentered(more, WS_CX, startY + maxShow * step,
+                              COL_DIMGRAY, &FreeSans9pt7b);
+        }
+    }
+
+    _drawFontCentered("R/L=SWITCH  hold=EXIT", WS_CX, 445, COL_GRAY, &FreeSans9pt7b);
+#endif
 }

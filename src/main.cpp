@@ -4,19 +4,24 @@
 #include "timer/WorkingTime.h"
 #include "timer/FlightTimer.h"
 #include "timer/FlightLog.h"
+#include "timer/RoundHistory.h"
 #include "display/UI.h"
 #include "input/Buttons.h"
 #include "audio/Tones.h"
 #include "comms/TimerComms.h"
 
-static AppState    g_state = STATE_IDLE;
-static WorkingTime g_wt;
-static FlightTimer g_ft;
-static FlightLog   g_log;
-static UI          g_ui;
-static Buttons     g_btns;
-static Tones       g_tones;
-static TimerComms  g_comms;
+static AppState      g_state = STATE_IDLE;
+static WorkingTime   g_wt;
+static FlightTimer   g_ft;
+static FlightLog     g_log;
+static RoundHistory  g_history;
+static UI            g_ui;
+static Buttons       g_btns;
+static Tones         g_tones;
+static TimerComms    g_comms;
+
+static int  g_histSlot  = 1;   // which history slot to display (0=current, 1=previous)
+static HistRound g_histRound;  // loaded on demand when entering STATE_HISTORY
 
 static unsigned long g_scratchStartMs  = 0;
 static int           g_wtMinutes       = 10;   // user-selected working time (minutes)
@@ -52,11 +57,15 @@ static int           g_countdownN     = 0;
 static int           _lastAltitudeM   = -1;
 static int           _lastAltFlightNo = -1;
 static bool          _lastIsF5K       = false;
+static int           _lastTimerId     = -2;  // -2 = "never rendered"
+static int           _lastHistSlot    = -1;
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
-    if (state == STATE_IDLE)              return connState != _lastConnState;
-    if (state == STATE_PILOT_SELECT)      return g_selectedPilotIdx != _lastPilotIdx;
+    if (state == STATE_IDLE)
+        return connState != _lastConnState || g_comms.getTimerId() != _lastTimerId;
+    if (state == STATE_HISTORY)       return g_histSlot != _lastHistSlot;
+    if (state == STATE_PILOT_SELECT)  return g_selectedPilotIdx != _lastPilotIdx;
     if (state == STATE_SCRATCH_CONFIRM)   return millis() >= _nextScratchMs;
     if (state == STATE_SETTINGS)          return g_wtMinutes != _lastWtMinutes;
     if (state == STATE_TASK_SELECT)       return g_isF5K != _lastIsF5K;
@@ -71,12 +80,22 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
 }
 
 static void _doRender(AppState state, int wtSecs) {
+    // History screen is rendered via a separate path (passes HistRound data)
+    if (state == STATE_HISTORY) {
+        g_history.load(g_histSlot, g_histRound);
+        g_ui.renderHistory(g_histSlot, g_histRound);
+        _lastState    = state;
+        _lastHistSlot = g_histSlot;
+        return;
+    }
+
     int battPct    = g_btns.getBatteryPercent();
     bool charging  = g_btns.isCharging();
     const char* pilot = (g_selectedPilotName[0] != '\0') ? g_selectedPilotName : nullptr;
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
                 battPct, charging, pilot, g_comms.baseConnState(), g_countdownN,
-                g_altitudeM, g_altFlightNo, g_log.count(), g_isF5K);
+                g_altitudeM, g_altFlightNo, g_log.count(), g_isF5K,
+                g_comms.getTimerId());
     _lastState      = state;
     _lastWtSecs     = wtSecs;
     _lastWtMinutes  = g_wtMinutes;
@@ -86,6 +105,7 @@ static void _doRender(AppState state, int wtSecs) {
     _lastAltitudeM   = g_altitudeM;
     _lastAltFlightNo = g_altFlightNo;
     _lastIsF5K       = g_isF5K;
+    _lastTimerId     = g_comms.getTimerId();
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
@@ -108,6 +128,7 @@ void setup() {
     g_wt.setAlertCallback(onAlert);
     g_log.reset();
     g_ui.begin();
+    g_history.begin();
 
     // Start base station connection attempt in background (non-blocking)
     g_comms.begin();
@@ -138,6 +159,7 @@ static void _startRound(bool withFlight) {
     g_ft.reset();
     g_altFlightNo = 0;
     g_altitudeM   = 0;
+    g_history.startRound(g_isF5K);
     if (withFlight) {
         g_ft.start();
         g_state = STATE_FLIGHT_RUNNING;
@@ -185,6 +207,7 @@ void loop() {
         if (g_state == STATE_FLIGHT_RUNNING) {
             unsigned long dur = g_ft.stop();
             g_log.addFlight(dur);
+            g_history.recordFlight(dur);
             g_comms.sendFlight(g_selectedPilotId, dur);
         }
         g_wt.reset();
@@ -266,6 +289,7 @@ void loop() {
             if (g_wt.isExpired()) {
                 unsigned long dur = g_ft.stop();
                 g_log.addFlight(dur);
+                g_history.recordFlight(dur);
                 g_comms.sendFlight(g_selectedPilotId, dur);
                 g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
@@ -282,6 +306,7 @@ void loop() {
                 // R click: stop flight and record time
                 unsigned long dur = g_ft.stop();
                 g_log.addFlight(dur);
+                g_history.recordFlight(dur);
                 g_comms.sendFlight(g_selectedPilotId, dur);
                 g_state = STATE_WORKING_TIME_RUNNING;
             }
@@ -290,6 +315,7 @@ void loop() {
         case STATE_ALTITUDE_ENTRY: {
             if (btnR_held) {
                 // Confirm altitude for this flight
+                g_history.recordAltitude(g_altFlightNo, g_altitudeM);
                 g_comms.sendAltitude(g_selectedPilotId, g_altFlightNo, g_altitudeM);
                 if (g_altFlightNo < g_log.count()) {
                     // Advance to next flight
@@ -297,6 +323,8 @@ void loop() {
                     g_altitudeM = 0;
                     // Stay in STATE_ALTITUDE_ENTRY — _needsRender detects flightNo change
                 } else {
+                    g_selectedPilotName[0] = '\0';
+                    g_selectedPilotId = 0;
                     g_state = STATE_IDLE;
                 }
                 break;
@@ -344,8 +372,15 @@ void loop() {
                     g_altitudeM   = 0;
                     g_state = STATE_ALTITUDE_ENTRY;
                 } else {
+                    g_selectedPilotName[0] = '\0';
+                    g_selectedPilotId = 0;
                     g_state = STATE_IDLE;
                 }
+            } else if (btnL) {
+                // L click: browse last round from NVS
+                g_histSlot = 1;
+                g_history.load(1, g_histRound);
+                g_state = STATE_HISTORY;
             }
             break;
 
@@ -384,6 +419,22 @@ void loop() {
             bool confirm = btnR_held ||
                            (millis() - g_taskSelectLastMs >= SETTINGS_TIMEOUT_MS);
             if (confirm) {
+                g_state = STATE_IDLE;
+            }
+            break;
+        }
+
+        case STATE_HISTORY: {
+            if (btnR) {
+                // R: switch to slot 0 (current round)
+                g_histSlot = 0;
+                g_history.load(0, g_histRound);
+            } else if (btnL) {
+                // L: switch to slot 1 (previous round)
+                g_histSlot = 1;
+                g_history.load(1, g_histRound);
+            } else if (btnR_held) {
+                // R hold: exit to IDLE
                 g_state = STATE_IDLE;
             }
             break;

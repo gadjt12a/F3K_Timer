@@ -115,28 +115,28 @@ bool TimerComms::hasCountdown()     { bool v = _hasCountdown;     _hasCountdown 
 
 void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
 #ifndef WOKWI_SIM
-    if (_state != COMMS_CONNECTED) return;
-    char buf[48];
+    char buf[64];
     snprintf(buf, sizeof(buf), "FLIGHT pilot=%d dur=%lu", pilotId, durationMs);
-    _sendLine(buf);
+    if (_state == COMMS_CONNECTED) _sendLine(buf);
+    else _enqueue(buf);
 #endif
 }
 
 void TimerComms::sendAltitude(int pilotId, int flightNo, int altM) {
 #ifndef WOKWI_SIM
-    if (_state != COMMS_CONNECTED) return;
-    char buf[48];
+    char buf[64];
     snprintf(buf, sizeof(buf), "ALTITUDE pilot=%d flight=%d alt=%d", pilotId, flightNo, altM);
-    _sendLine(buf);
+    if (_state == COMMS_CONNECTED) _sendLine(buf);
+    else _enqueue(buf);
 #endif
 }
 
 void TimerComms::sendSelect(int pilotId) {
 #ifndef WOKWI_SIM
-    if (_state != COMMS_CONNECTED) return;
-    char buf[24];
+    char buf[32];
     snprintf(buf, sizeof(buf), "SELECT pilot=%d", pilotId);
-    _sendLine(buf);
+    if (_state == COMMS_CONNECTED) _sendLine(buf);
+    else _enqueue(buf);
 #endif
 }
 
@@ -172,6 +172,7 @@ void TimerComms::_parseLine(const char* line) {
     if (strncmp(line, "ASSIGN id=", 10) == 0) {
         _timerId = atoi(line + 10);
         Serial.printf("[COMMS] Assigned timer ID: %d\n", _timerId);
+        _flushPending();  // send any messages queued while we were disconnected
 
     } else if (strncmp(line, "TASK wt=", 8) == 0) {
         _taskWtSeconds = atoi(line + 8);
@@ -202,6 +203,28 @@ void TimerComms::_parseLine(const char* line) {
     } else {
         Serial.printf("[COMMS] Unknown message: %s\n", line);
     }
+}
+
+void TimerComms::_enqueue(const char* line) {
+    int next = (_pendingTail + 1) % PENDING_MAX;
+    if (next == _pendingHead) {
+        Serial.println("[COMMS] Pending buffer full — dropping message");
+        return;
+    }
+    strncpy(_pending[_pendingTail].line, line, PENDING_LINE - 1);
+    _pending[_pendingTail].line[PENDING_LINE - 1] = '\0';
+    _pendingTail = next;
+    Serial.printf("[COMMS] Queued (offline): %s\n", line);
+}
+
+void TimerComms::_flushPending() {
+    int count = 0;
+    while (_pendingHead != _pendingTail) {
+        _sendLine(_pending[_pendingHead].line);
+        _pendingHead = (_pendingHead + 1) % PENDING_MAX;
+        count++;
+    }
+    if (count > 0) Serial.printf("[COMMS] Flushed %d queued messages\n", count);
 }
 
 // Parse "1:Alice Smi,2:Bob Jon,3:Charlie Bro"

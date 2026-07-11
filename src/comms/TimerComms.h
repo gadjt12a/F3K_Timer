@@ -67,10 +67,20 @@ private:
     char _rxBuf[RX_BUF_SIZE];
     int  _rxLen = 0;
 
+    // Outbound message buffer — queues FLIGHT/ALTITUDE/SELECT when disconnected
+    static const int  PENDING_MAX  = 16;
+    static const int  PENDING_LINE = 64;
+    struct PendingMsg { char line[PENDING_LINE]; };
+    PendingMsg _pending[PENDING_MAX];
+    int        _pendingHead = 0;
+    int        _pendingTail = 0;
+
 #ifndef WOKWI_SIM
     void _readLines();
     void _parseLine(const char* line);
     void _parsePilots(const char* data);
     void _sendLine(const char* line);
+    void _enqueue(const char* line);
+    void _flushPending();
 #endif
 };
