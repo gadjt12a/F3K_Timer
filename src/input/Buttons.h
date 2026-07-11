@@ -30,8 +30,8 @@ private:
     bool _prevA = false, _prevB = false;
     unsigned long _pressedAms = 0, _pressedBms = 0;
     unsigned long _lastBChangeMs = 0;  // debounce tracking
-    unsigned long _lastAClickMs  = 0;  // cooldown: suppress bouncy POSITIVE edges
-    bool _startupIgnoreA = false;     // eat the power-on button release after boot
+    unsigned long _lastAClickMs      = 0;  // cooldown: suppress bouncy POSITIVE edges
+    unsigned long _startupIgnoreUntilMs = 0; // suppress A clicks for 2s after boot
     bool _holdFiredA = false, _holdFiredB = false;
     bool _veryLongFiredA = false, _veryLongFiredB = false;
     bool _clickA = false, _clickB = false;

@@ -22,7 +22,11 @@ void Buttons::begin() {
                        XPOWERS_AXP2101_PKEY_NEGATIVE_IRQ  |
                        XPOWERS_AXP2101_PKEY_POSITIVE_IRQ);
         _pmu.clearIrqStatus();
-        _startupIgnoreA = true;  // discard the POSITIVE IRQ from the power-on press
+        // Suppress A clicks for 2s after boot. The power-on button press generates
+        // a POSITIVE (release) IRQ that can arrive at any point during or after setup
+        // depending on how long the user holds the button. A single-event flag is
+        // fragile because setup length varies; a time window is more reliable.
+        _startupIgnoreUntilMs = millis() + 2000;
 
         // Enable power rails for audio subsystem
         _pmu.setALDO2Voltage(3300); _pmu.enableALDO2();
@@ -55,9 +59,8 @@ void Buttons::update() {
     if (irqStatus & 0x0F00) {
         _pmu.clearIrqStatus();
         if (irqStatus & 0x0100) {
-            if (_startupIgnoreA) {
-                _startupIgnoreA = false;
-                Serial.println("[BTN] A (PWR) power-on release ignored");
+            if (millis() < _startupIgnoreUntilMs) {
+                Serial.println("[BTN] A (PWR) startup click ignored");
             } else {
                 rawA = true;
             }
