@@ -14,10 +14,9 @@ void Buttons::begin() {
         _pmu.disableSleep();
 
         _pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
-        // Enable all four PKEY IRQ types. In update() we check INTSTS2 bits
-        // 0-3 directly from getIrqStatus() so any PKEY detector fires a click
-        // — including NEGATIVE (button press edge) which gives instant response
-        // for quick taps like altitude entry without waiting for PONTIME.
+        // Enable all four PKEY IRQ types. In update() we act only on POSITIVE
+        // (release) so that holding the button to power off does not trigger
+        // a click — the AXP2101 powers the device off before the release IRQ fires.
         _pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ    |
                        XPOWERS_AXP2101_PKEY_LONG_IRQ      |
                        XPOWERS_AXP2101_PKEY_NEGATIVE_IRQ  |
@@ -47,14 +46,16 @@ void Buttons::update() {
     bool rawB = (digitalRead(BTN_B_SIM) == LOW);
 #else
     // Read INTSTS2 directly from getIrqStatus() return bits[15:8].
-    // Checking bits 0-3 catches any PKEY event (POSITIVE, NEGATIVE, LONG,
-    // SHORT) without the intRegister[] gate, so NEGATIVE (button pressed)
-    // fires a click immediately — no PONTIME wait required.
+    // Clear on any PKEY event (0x0F00) but only register a click on POSITIVE
+    // (0x0100 = _BV(8) = release edge), so holding L to power off never
+    // triggers a click — the device powers down before the release fires.
     bool rawA = false;
     uint32_t irqStatus = _pmu.getIrqStatus();
     if (irqStatus & 0x0F00) {
-        rawA = true;
         _pmu.clearIrqStatus();
+        if (irqStatus & 0x0100) {
+            rawA = true;
+        }
     }
     bool rawB = (digitalRead(BTN_BOOT) == LOW);
 #endif
@@ -79,8 +80,7 @@ void Buttons::update() {
     }
     _prevA = rawA;
 #else
-    // 350ms cooldown: AXP2101 fires both NEGATIVE (press) and POSITIVE (release)
-    // edges, which would register two clicks per tap. Only accept the first.
+    // 200ms cooldown guards against bouncy POSITIVE edges from a single release.
     if (rawA && (now - _lastAClickMs >= 200)) {
         _clickA      = true;
         _lastAClickMs = now;

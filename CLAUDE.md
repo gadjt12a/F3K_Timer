@@ -176,10 +176,12 @@ Buttons (hardware)            Buttons (Wokwi sim)
 - Implementation in `Buttons::update()`:
   - Enable all four PKEY IRQ types (SHORT, LONG, NEGATIVE, POSITIVE) so INTEN2 bits 0-3 are set
   - Call `disableSleep()` on init — sleep mode suppresses PKEY events
-  - Read `getIrqStatus()` and check `irqStatus & 0x0F00` (INTSTS2 bits 0-3) directly,
-    bypassing the `intRegister[]` cache gate used by `isPekey*Irq()` helpers
-  - **200 ms cooldown** after each click — AXP2101 fires both NEGATIVE (press) and
-    POSITIVE (release) edges per button cycle; without a cooldown every tap registers twice
+  - Read `getIrqStatus()` and check `irqStatus & 0x0F00` (INTSTS2 bits 0-3) to detect
+    any PKEY event, but only register a click when `irqStatus & 0x0100` (POSITIVE/release
+    edge, `_BV(8)`) is set — this way holding L to power off never triggers a click
+    because the AXP2101 powers the device off before the release IRQ can fire
+  - `clearIrqStatus()` is called on any PKEY event so NEGATIVE bits don't linger
+  - **200 ms cooldown** after each click as a guard against bouncy POSITIVE edges
 
 **Button B — BOOT button (GPIO0)**
 - Physical position: top-right when device is rotated 90° CW (stopwatch orientation)
