@@ -33,7 +33,10 @@ static const int ALERT_COUNT   = 14;
 #define SCRATCH_CONFIRM_MS    2000
 
 // ── Settings ─────────────────────────────────────────────────────────────────
-#define SETTINGS_TIMEOUT_MS   8000   // auto-confirm after 8s inactivity
+#define SETTINGS_TIMEOUT_MS      8000  // auto-confirm WT page after 8s inactivity
+#define TASK_SELECT_TIMEOUT_MS   3000  // auto-confirm task-select page after 3s
+#define HIST_SLOTS               3     // NVS round history slots (newest → oldest)
+#define HIST_TIMEOUT_MS          8000  // auto-exit history screen after 8s inactivity
 
 // ── Flight log ────────────────────────────────────────────────────────────────
 #define MAX_FLIGHTS             10
@@ -50,7 +53,7 @@ enum AppState : uint8_t {
     STATE_PILOT_SELECT,         // connected to base: choose pilot before each round
     STATE_COUNTDOWN,            // base sent COUNT 10..1: green arc countdown to WT start
     STATE_ALTITUDE_ENTRY,       // F5K only: enter altitude (m) after each flight
-    STATE_HISTORY               // browse last 2 rounds from NVS (enter from expired screen)
+    STATE_HISTORY               // browse last HIST_SLOTS rounds from NVS
 };
 
 // ── Base station connection state (for UI indicator) ─────────────────────────

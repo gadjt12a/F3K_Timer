@@ -20,7 +20,7 @@ static Buttons       g_btns;
 static Tones         g_tones;
 static TimerComms    g_comms;
 
-static int  g_histSlot  = 1;   // which history slot to display (0=current, 1=previous)
+static int  g_histSlot  = 0;   // which history slot to display (0=most recent)
 static HistRound g_histRound;  // loaded on demand when entering STATE_HISTORY
 
 static unsigned long g_scratchStartMs  = 0;
@@ -34,6 +34,7 @@ static int  g_altFlightNo = 0;  // 1-based index of flight being entered; 0 = no
 // Task type: false = F3K (no altitude), true = F5K (altitude entry after round)
 static bool g_isF5K = false;
 static unsigned long g_taskSelectLastMs = 0;
+static unsigned long g_histLastMs       = 0;   // tracks inactivity in STATE_HISTORY
 
 // Pilot selection (only used when connected to base station)
 static int  g_selectedPilotIdx = 0;
@@ -83,7 +84,7 @@ static void _doRender(AppState state, int wtSecs) {
     // History screen is rendered via a separate path (passes HistRound data)
     if (state == STATE_HISTORY) {
         g_history.load(g_histSlot, g_histRound);
-        g_ui.renderHistory(g_histSlot, g_histRound);
+        g_ui.renderHistory(g_histSlot, g_histRound, HIST_SLOTS);
         _lastState    = state;
         _lastHistSlot = g_histSlot;
         return;
@@ -159,7 +160,7 @@ static void _startRound(bool withFlight) {
     g_ft.reset();
     g_altFlightNo = 0;
     g_altitudeM   = 0;
-    g_history.startRound(g_isF5K);
+    g_history.startRound(g_isF5K, g_selectedPilotName);
     if (withFlight) {
         g_ft.start();
         g_state = STATE_FLIGHT_RUNNING;
@@ -377,9 +378,9 @@ void loop() {
                     g_state = STATE_IDLE;
                 }
             } else if (btnL) {
-                // L click: browse last round from NVS
-                g_histSlot = 1;
-                g_history.load(1, g_histRound);
+                // L click: browse round history from NVS (start at most recent)
+                g_histSlot  = 0;
+                g_histLastMs = millis();
                 g_state = STATE_HISTORY;
             }
             break;
@@ -416,27 +417,37 @@ void loop() {
             }
             if (changed) g_taskSelectLastMs = millis();
 
+            // R hold or 3s timeout: save selection and open history screen
             bool confirm = btnR_held ||
-                           (millis() - g_taskSelectLastMs >= SETTINGS_TIMEOUT_MS);
+                           (millis() - g_taskSelectLastMs >= TASK_SELECT_TIMEOUT_MS);
             if (confirm) {
-                g_state = STATE_IDLE;
+                g_histSlot   = 0;
+                g_histLastMs = millis();
+                g_state = STATE_HISTORY;
             }
             break;
         }
 
         case STATE_HISTORY: {
-            if (btnR) {
-                // R: switch to slot 0 (current round)
-                g_histSlot = 0;
-                g_history.load(0, g_histRound);
-            } else if (btnL) {
-                // L: switch to slot 1 (previous round)
-                g_histSlot = 1;
-                g_history.load(1, g_histRound);
-            } else if (btnR_held) {
-                // R hold: exit to IDLE
+            bool acted = false;
+            if (btnR_held) {
                 g_state = STATE_IDLE;
+                break;
+            } else if (btnR) {
+                if (g_histSlot == 0) {
+                    // R at newest slot: exit to IDLE
+                    g_state = STATE_IDLE;
+                    break;
+                }
+                g_histSlot--;
+                acted = true;
+            } else if (btnL) {
+                if (g_histSlot < HIST_SLOTS - 1) g_histSlot++;
+                acted = true;
             }
+            if (acted) g_histLastMs = millis();
+            // 8s inactivity timeout
+            if (millis() - g_histLastMs >= HIST_TIMEOUT_MS) g_state = STATE_IDLE;
             break;
         }
     }

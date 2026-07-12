@@ -1162,31 +1162,41 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
 
 // ── Round history (NVS) ───────────────────────────────────────────────────────
 
-void UI::renderHistory(int slot, const HistRound& hist) {
+void UI::renderHistory(int slot, const HistRound& hist, int totalSlots) {
     _clearScreen();
-    _drawHistory(slot, hist);
+    _drawHistory(slot, hist, totalSlots);
 #ifndef WOKWI_SIM
     _gfx->flush();
 #endif
 }
 
-void UI::_drawHistory(int slot, const HistRound& hist) {
+void UI::_drawHistory(int slot, const HistRound& hist, int totalSlots) {
 #ifndef WOKWI_SIM
     ws_fillRing(_gfx, WS_CX, WS_CY, 225, 218, COL_DIMGRAY);
 
-    const char* title = (slot == 0) ? "THIS ROUND" : "LAST ROUND";
-    _drawFontCentered(title, WS_CX, 65, COL_WHITE, &FreeSansBold18pt7b);
+    // Title + slot indicator
+    _drawFontCentered("ROUND RECALL", WS_CX, 55, COL_WHITE, &FreeSansBold18pt7b);
+    char slotBuf[12];
+    snprintf(slotBuf, sizeof(slotBuf), "%d of %d", slot + 1, totalSlots);
+    _drawFontCentered(slotBuf, WS_CX, 92, COL_GRAY, &FreeSans9pt7b);
 
     if (!hist.valid || hist.count == 0) {
-        _drawFontCentered("No data saved", WS_CX, 220, COL_DIMGRAY, &FreeSans12pt7b);
+        _drawFontCentered("No data saved", WS_CX, 240, COL_DIMGRAY, &FreeSans12pt7b);
     } else {
         bool isF5K = (strncmp(hist.discipline, "F5K", 3) == 0);
-        _drawFontCentered(hist.discipline, WS_CX, 110,
+
+        // Pilot name (if recorded)
+        int disciplineY = 128;
+        if (hist.pilotName[0] != '\0') {
+            _drawFontCentered(hist.pilotName, WS_CX, 120, COL_GRAY, &FreeSans12pt7b);
+            disciplineY = 152;
+        }
+        _drawFontCentered(hist.discipline, WS_CX, disciplineY,
                           isF5K ? COL_FUCHSIA : COL_ORANGE, &FreeSansBold18pt7b);
 
-        const int step    = 38;
-        const int maxShow = 8;
-        const int startY  = 155;
+        const int step    = 36;
+        const int maxShow = 7;
+        const int startY  = (hist.pilotName[0] != '\0') ? 192 : 178;
         for (int i = 0; i < hist.count && i < maxShow; i++) {
             char timeBuf[16]; fmtMs(hist.flightMs[i], timeBuf, sizeof(timeBuf));
             char row[32];
@@ -1207,6 +1217,9 @@ void UI::_drawHistory(int slot, const HistRound& hist) {
         }
     }
 
-    _drawFontCentered("R/L=SWITCH  hold=EXIT", WS_CX, 445, COL_GRAY, &FreeSans9pt7b);
+    // Nav hint — slot 0 is newest so R exits there
+    const char* hint = (slot == 0) ? "L=OLDER  R=EXIT  hold=EXIT"
+                                   : "L=OLDER  R=NEWER  hold=EXIT";
+    _drawFontCentered(hint, WS_CX, 448, COL_GRAY, &FreeSans9pt7b);
 #endif
 }

@@ -37,7 +37,7 @@ public:
                 bool               isF5K           = false,
                 int                timerId         = -1);
 
-    void renderHistory(int slot, const HistRound& hist);
+    void renderHistory(int slot, const HistRound& hist, int totalSlots);
 
 private:
 #ifdef WOKWI_SIM
@@ -69,7 +69,7 @@ private:
     void _drawIdle(BaseConnState connState = BASE_DISCONNECTED,
                   const char* pilotName = nullptr,
                   int timerId = -1);
-    void _drawHistory(int slot, const HistRound& hist);
+    void _drawHistory(int slot, const HistRound& hist, int totalSlots);
     void _drawPilotSelect(const char* pilotName);
     void _drawExpired(const FlightLog& log);
 
