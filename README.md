@@ -25,7 +25,7 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 - **10-second countdown arc** — green sweep during pre-round countdown from base
 - **Timer ID display** — after ASSIGN, shows `T1` / `T2` etc. bold green on idle screen between battery indicator and GLIDE title
 - **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live; BASE OK replaced by pilot name once a pilot is selected
-- **NVS round history** — stores last 2 rounds (discipline, flight times, F5K altitudes) to ESP32 NVS; each flight written immediately so data survives power loss mid-round; accessible via `STATE_HISTORY` from the expired screen
+- **NVS round history (ROUND RECALL)** — stores last 3 rounds (discipline, pilot name, flight times, F5K altitudes) to ESP32 NVS; each flight written immediately so data survives power loss mid-round; accessible via `STATE_HISTORY` from the expired screen (L) or settings chain; "N of 3" slot indicator, L=older / R=newer/exit, 8s inactivity timeout
 - **Pilot decouple** — timer clears pilot binding automatically when returning to idle after a completed round
 
 ## Hardware
@@ -82,10 +82,11 @@ ALTITUDE_ENTRY  (F5K only)
   L click      → +10 m  (tens digit, 0→100→0)
   R hold       → confirm altitude, next flight (or IDLE when done; IDLE clears pilot binding)
 
-HISTORY  (NVS round review)
-  R click      → switch to slot 0 (current round)
-  L click      → switch to slot 1 (previous round)
+HISTORY  (NVS round recall — up to 3 slots)
+  L click      → older slot (slot+1, max slot 2)
+  R click      → newer slot (slot-1), or IDLE when at slot 0
   R hold       → IDLE
+  8s timeout  → IDLE
 
 SETTINGS  (page 1: working time)
   R click      → +1 minute
@@ -94,7 +95,7 @@ SETTINGS  (page 1: working time)
 
 TASK_SELECT  (page 2: task type)
   R or L click → toggle F3K / F5K
-  R hold / 8s timeout → IDLE
+  R hold / 3s timeout → HISTORY  (slot 0)
 
 PILOT_SELECT  (base station only)
   R click      → next pilot
