@@ -144,6 +144,35 @@ Buttons in sim: GPIO16 (green) = L, GPIO17 (blue) = R.
 
 Flash mode: hold BOOT, tap RESET, release BOOT — device enumerates as USB serial on COM4.
 
+## Firmware Releases
+
+Compiled firmware snapshots are stored in `firmware/releases/` and tagged in git as `fw-vN`.
+The last 5 builds are kept on disk; all git tags are kept indefinitely.
+
+### Create a release
+
+```powershell
+.\scripts\release-firmware.ps1
+```
+
+Builds the waveshare firmware, copies the three `.bin` files to `firmware/releases/fw-vN/`,
+commits, tags the commit `fw-vN`, then prints the push command. Run this at the end of each
+session before pushing.
+
+### Roll back
+
+To revert the device to a previous build, flash the binaries directly from the release folder:
+
+```powershell
+esptool.py --chip esp32s3 --port COM4 --baud 921600 write_flash `
+    0x00000 firmware\releases\fw-v9\bootloader.bin `
+    0x08000 firmware\releases\fw-v9\partitions.bin `
+    0x10000 firmware\releases\fw-v9\firmware.bin
+```
+
+Flash addresses and the source commit hash are recorded in each `release.txt`.
+To inspect or rebuild from an older source state: `git checkout fw-vN`.
+
 ## Project Structure
 
 ```

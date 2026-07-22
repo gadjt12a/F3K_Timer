@@ -547,35 +547,40 @@ drops during WORKING will rejoin and start the full working time from scratch
 
 ```
 f3k-timer/
-  CLAUDE.md               ← this file — read before any change
-  platformio.ini          ← [env:wokwi] active; [env:waveshare] in docs/HARDWARE_ENV.md
-  wokwi.toml              ← Wokwi simulator config
-  diagram.json            ← Wokwi circuit diagram
+  CLAUDE.md               <- this file -- read before any change
+  platformio.ini          <- [env:wokwi] active; [env:waveshare] in docs/HARDWARE_ENV.md
+  wokwi.toml              <- Wokwi simulator config
+  diagram.json            <- Wokwi circuit diagram
+  scripts/
+    release-firmware.ps1  <- versioned firmware snapshot tool (see Firmware Release Workflow)
+  firmware/
+    releases/             <- last 5 compiled waveshare builds, each in fw-vN/ subfolder
+                             contents: firmware.bin, bootloader.bin, partitions.bin, release.txt
   include/
-    config.h              ← task types, timing constants (env-aware via build flags)
-    pin_config.h          ← ALL GPIO defines — do not hardcode pins elsewhere
+    config.h              <- task types, timing constants (env-aware via build flags)
+    pin_config.h          <- ALL GPIO defines -- do not hardcode pins elsewhere
   src/
-    main.cpp              ← setup(), loop(), state machine
+    main.cpp              <- setup(), loop(), state machine
     timer/
-      WorkingTime.h/.cpp  ← countdown, alert trigger logic
-      FlightTimer.h/.cpp  ← individual flight stopwatch
-      FlightLog.h/.cpp    ← flight list, scratch, best-time index
+      WorkingTime.h/.cpp  <- countdown, alert trigger logic
+      FlightTimer.h/.cpp  <- individual flight stopwatch
+      FlightLog.h/.cpp    <- flight list, scratch, best-time index
     display/
-      UI.h/.cpp           ← screen layout, render dispatcher
-                            Wokwi path: implemented (rectangular ILI9341)
-                            Waveshare path: TO BE BUILT (round CO5300, radial layout)
-      ArcRenderer.h/.cpp  ← CCW arc ring, colour thresholds
+      UI.h/.cpp           <- screen layout, render dispatcher
+                             Wokwi path: implemented (rectangular ILI9341)
+                             Waveshare path: fully implemented (round CO5300, radial layout)
+      ArcRenderer.h/.cpp  <- CCW arc ring, colour thresholds
     input/
-      Buttons.h/.cpp      ← PWR+GPIO0 (HW) or GPIO16/17 (sim) — same API
+      Buttons.h/.cpp      <- PWR+GPIO0 (HW) or GPIO16/17 (sim) -- same API
     audio/
-      Tones.h/.cpp        ← I2S sine wave alerts (HW) or stub (sim)
-    storage/              ← Phase 2
-      FlashStorage.h/.cpp ← NVS persistence via Preferences
+      Tones.h/.cpp        <- I2S sine wave alerts (HW) or stub (sim)
+    storage/
+      FlashStorage.h/.cpp <- NVS persistence via Preferences
     comms/
-      TimerComms.h/.cpp   ← WiFi TCP client: JOIN, PILOTS, COUNT, TASK, START, STOP, FLIGHT, PING
+      TimerComms.h/.cpp   <- WiFi TCP client: JOIN, PILOTS, COUNT, TASK, START, STOP, FLIGHT, PING
   docs/
-    HARDWARE_ENV.md       ← [env:waveshare] platformio block + flash instructions
-    INPUT_DESIGN.md       ← touch gesture spec, button ergonomics rationale
+    HARDWARE_ENV.md       <- [env:waveshare] platformio block + flash instructions
+    INPUT_DESIGN.md       <- touch gesture spec, button ergonomics rationale
 ```
 
 ---
@@ -634,21 +639,86 @@ f3k-timer/
     After `setRotation(1)`, apply: `rotX = y_raw; rotY = (466 - x_raw)` before using
     touch coordinates for gesture detection or tap zone matching.
 
+12. **PowerShell scripts must be ASCII-only** — PowerShell 5.1 reads `.ps1` files as
+    Windows-1252. UTF-8 multi-byte characters (em dashes U+2014, box-drawing U+25xx,
+    smart quotes) have byte sequences that Windows-1252 maps to `"` or other syntax
+    characters, silently corrupting string parsing for everything after that point.
+    Keep `scripts/*.ps1` to ASCII (0-127) only. Use `--` not `--`, `-` not `-`, straight
+    quotes only. The em dash bug originally broke `release-firmware.ps1` at session 28.
+
+---
+
+## Firmware Release Workflow
+
+Versioned firmware snapshots live in `firmware/releases/` and are tagged in git as `fw-vN`.
+The 5 most recent compiled builds are kept on disk; git tags for all versions are kept indefinitely.
+
+### Creating a release (run at the end of each session before pushing)
+
+```powershell
+# From the project root:
+.\scripts\release-firmware.ps1            # build then snapshot
+.\scripts\release-firmware.ps1 -SkipBuild # snapshot from the last .pio build output
+```
+
+The script:
+1. Auto-increments the version (fw-v1, fw-v2, ...) by scanning existing git tags
+2. Builds the waveshare env (unless -SkipBuild)
+3. Copies `firmware.bin`, `bootloader.bin`, `partitions.bin` to `firmware/releases/fw-vN/`
+4. Writes `release.txt` with version, date, source commit hash, and esptool flash addresses
+5. Deletes the oldest release folder when more than 5 are present
+6. Commits the `firmware/` changes then tags that commit `fw-vN`
+
+After the script:
+```powershell
+git push; git push origin fw-vN
+```
+
+### Rolling back firmware
+
+| Situation | Action |
+|---|---|
+| Need to revert the device quickly | `cd firmware\releases\fw-vN` then run esptool with addresses in `release.txt` |
+| Need to inspect or rebuild old source | `git checkout fw-vN` |
+| Compare source between versions | `git diff fw-v8 fw-v9` |
+
+Compiled binaries exist from fw-v10 onward. fw-v1 through fw-v9 are source-only tags
+(retrospectively applied) -- rebuilding requires `git checkout fw-vN` then a manual build.
+
+### CRITICAL: scripts/*.ps1 must be ASCII-only
+
+PowerShell 5.1 reads `.ps1` files as Windows-1252 (not UTF-8). UTF-8 multi-byte sequences
+(em dashes, box-drawing characters, smart quotes) are misread as Windows-1252 byte values,
+which can corrupt string parsing for the entire rest of the file.
+
+**Never use non-ASCII characters in any file under `scripts/`.** Use `--` instead of `--`,
+plain `-` instead of `-`, and straight quotes only. Verify with:
+```powershell
+$bytes = [System.IO.File]::ReadAllBytes("scripts\release-firmware.ps1")
+[System.Text.Encoding]::UTF8.GetString($bytes) | ForEach-Object {
+    if ([int][char]$_ -gt 127) { Write-Host "Non-ASCII found" }
+}
+```
+
 ---
 
 ## Build & Flash (hardware)
 
 See `docs/HARDWARE_ENV.md` for full setup. Quick reference:
 
-```bash
-# Wokwi sim
-pio run -e wokwi
-# (then use Wokwi VS Code extension to run)
+```powershell
+# Wokwi sim (then use Wokwi VS Code extension to run)
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e wokwi
 
-# Hardware build (once env:waveshare is configured)
-pio run -e waveshare
-pio run -e waveshare --target upload
-pio device monitor -e waveshare --baud 115200
+# Hardware -- build only
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e waveshare
+
+# Hardware -- build and flash (device must be in download mode: hold BOOT, tap RESET, release BOOT)
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e waveshare --target upload --upload-port COM4 --project-dir "C:\Kris\Projects\F3K_Timer_1"
+
+# Serial monitor
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --environment waveshare --baud 115200 --project-dir "C:\Kris\Projects\F3K_Timer_1"
 ```
 
-Flash mode: hold BOOT, tap RESET, release BOOT — device enumerates as USB serial.
+For a release flash (end of session), prefer the release script over the raw pio command --
+it snapshots the binary, commits, and tags in one step.

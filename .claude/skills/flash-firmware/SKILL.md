@@ -25,6 +25,16 @@ After flashing, do NOT open the serial monitor. If the user wants serial output,
 ! pio device monitor --environment waveshare --baud 115200 --project-dir "C:\Kris\Projects\F3K_Timer_1"
 ```
 
+## Release vs. Development Flash
+
+If this is a milestone flash (end of a session, feature complete, ready to test in the field),
+remind the user to create a firmware release snapshot first:
+```powershell
+.\scripts\release-firmware.ps1
+```
+This builds, snapshots the binaries to `firmware/releases/fw-vN/`, commits, and tags `fw-vN`.
+Then flash normally. Skip this for quick iterative dev flashes during active coding.
+
 ## Device Details
 
 - Board: Waveshare ESP32-S3-Touch-LCD-1.28 (CO5300 QSPI display)
