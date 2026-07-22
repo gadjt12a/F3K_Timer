@@ -1160,6 +1160,66 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
     }
 }
 
+// ── OTA firmware update screen ────────────────────────────────────────────────
+
+void UI::renderOtaCheck(OtaStatus status, int progress, const char* availVer) {
+    _clearScreen();
+    _drawOtaCheck(status, progress, availVer);
+#ifndef WOKWI_SIM
+    _gfx->flush();
+#endif
+}
+
+void UI::_drawOtaCheck(OtaStatus status, int progress, const char* availVer) {
+#ifndef WOKWI_SIM
+    ws_fillRing(_gfx, WS_CX, WS_CY, 225, 218, COL_DIMGRAY);
+
+    _drawFontCentered("FIRMWARE", WS_CX, 55, COL_GRAY, &FreeSansBold18pt7b);
+
+    _drawFontCentered(FW_VERSION, WS_CX, WS_CY - 20, COL_WHITE, &FreeSansBold24pt7b);
+
+    // Status text (color-coded by state)
+    char statusBuf[40] = "";
+    uint16_t statusCol = COL_WHITE;
+    switch (status) {
+        case OTA_IDLE:                                                           break;
+        case OTA_CHECKING:    strcpy(statusBuf, "CHECKING...");
+                              statusCol = COL_GRAY;                              break;
+        case OTA_UP_TO_DATE:  strcpy(statusBuf, "UP TO DATE");
+                              statusCol = COL_GREEN;                             break;
+        case OTA_AVAILABLE:
+            snprintf(statusBuf, sizeof(statusBuf), "%s AVAIL",
+                     (availVer && availVer[0]) ? availVer : "UPDATE");
+            statusCol = COL_YELLOW;
+            break;
+        case OTA_DOWNLOADING:
+            snprintf(statusBuf, sizeof(statusBuf), "LOADING  %d%%", progress);
+            statusCol = COL_ORANGE;
+            break;
+        case OTA_SUCCESS:     strcpy(statusBuf, "DONE  REBOOTING...");
+                              statusCol = COL_GREEN;                             break;
+        case OTA_FAILED:      strcpy(statusBuf, "FAILED");
+                              statusCol = COL_RED;                               break;
+        case OTA_NO_WIFI:     strcpy(statusBuf, "NO WIFI");
+                              statusCol = COL_RED;                               break;
+    }
+    if (statusBuf[0]) {
+        _drawFontCentered(statusBuf, WS_CX, WS_CY + 50, statusCol, &FreeSans12pt7b);
+    }
+
+    // Action hints (only shown when not mid-download)
+    bool busy = (status == OTA_DOWNLOADING || status == OTA_SUCCESS);
+    if (!busy) {
+        if (status == OTA_AVAILABLE) {
+            _drawFontCentered("HOLD R = UPDATE", WS_CX, 370, COL_WHITE, &FreeSans12pt7b);
+        }
+        _drawFontCentered("R = EXIT", WS_CX, 408, COL_DIMGRAY, &FreeSans9pt7b);
+    }
+#else
+    _drawCentered("OTA: HW ONLY", DISPLAY_CX, DISPLAY_CY, COL_GRAY, 1);
+#endif
+}
+
 // ── Round history (NVS) ───────────────────────────────────────────────────────
 
 void UI::renderHistory(int slot, const HistRound& hist, int totalSlots) {

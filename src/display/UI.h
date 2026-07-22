@@ -38,6 +38,7 @@ public:
                 int                timerId         = -1);
 
     void renderHistory(int slot, const HistRound& hist, int totalSlots);
+    void renderOtaCheck(OtaStatus status, int progress, const char* availVer);
 
 private:
 #ifdef WOKWI_SIM
@@ -86,6 +87,7 @@ private:
                                int maxShown);
     void _drawAltitudeEntry(int altM, int flightNo, int totalFlights);
     void _drawAltitudeEntryInc(int altM);
+    void _drawOtaCheck(OtaStatus status, int progress, const char* availVer);
     void _drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t size);
     void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font);
     void _updateArc(int remaining, int total);

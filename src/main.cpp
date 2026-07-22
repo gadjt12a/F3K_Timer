@@ -10,6 +10,11 @@
 #include "audio/Tones.h"
 #include "comms/TimerComms.h"
 
+#ifdef WAVESHARE_HW
+#include <esp_ota_ops.h>
+#include "ota/OtaUpdater.h"
+#endif
+
 static AppState      g_state = STATE_IDLE;
 static WorkingTime   g_wt;
 static FlightTimer   g_ft;
@@ -19,6 +24,9 @@ static UI            g_ui;
 static Buttons       g_btns;
 static Tones         g_tones;
 static TimerComms    g_comms;
+#ifdef WAVESHARE_HW
+static OtaUpdater    g_ota;
+#endif
 
 static int  g_histSlot  = 0;   // which history slot to display (0=most recent)
 static HistRound g_histRound;  // loaded on demand when entering STATE_HISTORY
@@ -35,6 +43,7 @@ static int  g_altFlightNo = 0;  // 1-based index of flight being entered; 0 = no
 static bool g_isF5K = false;
 static unsigned long g_taskSelectLastMs = 0;
 static unsigned long g_histLastMs       = 0;   // tracks inactivity in STATE_HISTORY
+static unsigned long g_otaLastMs        = 0;   // tracks inactivity in STATE_OTA_CHECK
 
 // Pilot selection (only used when connected to base station)
 static int  g_selectedPilotIdx = 0;
@@ -60,12 +69,21 @@ static int           _lastAltFlightNo = -1;
 static bool          _lastIsF5K       = false;
 static int           _lastTimerId     = -2;  // -2 = "never rendered"
 static int           _lastHistSlot    = -1;
+#ifdef WAVESHARE_HW
+static OtaStatus     _lastOtaStatus   = OTA_IDLE;
+static int           _lastOtaProg10   = -1;  // progress in 10% increments
+#endif
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
     if (state == STATE_IDLE)
         return connState != _lastConnState || g_comms.getTimerId() != _lastTimerId;
     if (state == STATE_HISTORY)       return g_histSlot != _lastHistSlot;
+#ifdef WAVESHARE_HW
+    if (state == STATE_OTA_CHECK)
+        return (g_ota.getStatus() != _lastOtaStatus ||
+                g_ota.getProgress() / 10 != _lastOtaProg10);
+#endif
     if (state == STATE_PILOT_SELECT)  return g_selectedPilotIdx != _lastPilotIdx;
     if (state == STATE_SCRATCH_CONFIRM)   return millis() >= _nextScratchMs;
     if (state == STATE_SETTINGS)          return g_wtMinutes != _lastWtMinutes;
@@ -89,6 +107,15 @@ static void _doRender(AppState state, int wtSecs) {
         _lastHistSlot = g_histSlot;
         return;
     }
+#ifdef WAVESHARE_HW
+    if (state == STATE_OTA_CHECK) {
+        g_ui.renderOtaCheck(g_ota.getStatus(), g_ota.getProgress(), g_ota.getAvailableVersion());
+        _lastOtaStatus = g_ota.getStatus();
+        _lastOtaProg10 = g_ota.getProgress() / 10;
+        _lastState     = state;
+        return;
+    }
+#endif
 
     int battPct    = g_btns.getBatteryPercent();
     bool charging  = g_btns.isCharging();
@@ -130,6 +157,21 @@ void setup() {
     g_log.reset();
     g_ui.begin();
     g_history.begin();
+
+#ifdef WAVESHARE_HW
+    // Mark this OTA image valid now that display and NVS are confirmed working.
+    // Must happen before any peripheral that could fail to avoid a rollback loop.
+    {
+        esp_ota_img_states_t ota_state;
+        const esp_partition_t* running = esp_ota_get_running_partition();
+        if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+            ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+            esp_ota_mark_app_valid_cancel_rollback();
+            Serial.println("=== OTA: app marked valid ===");
+        }
+    }
+    g_ota.begin();
+#endif
 
     // Start base station connection attempt in background (non-blocking)
     g_comms.begin();
@@ -417,14 +459,40 @@ void loop() {
             }
             if (changed) g_taskSelectLastMs = millis();
 
-            // R hold or 3s timeout: save selection and open history screen
+            // R hold or 3s timeout: advance to OTA check screen (page 3 of settings)
             bool confirm = btnR_held ||
                            (millis() - g_taskSelectLastMs >= TASK_SELECT_TIMEOUT_MS);
             if (confirm) {
-                g_histSlot   = 0;
-                g_histLastMs = millis();
-                g_state = STATE_HISTORY;
+#ifdef WAVESHARE_HW
+                g_otaLastMs = millis();
+                g_ota.check();
+                g_state = STATE_OTA_CHECK;
+#else
+                g_state = STATE_IDLE;
+#endif
             }
+            break;
+        }
+
+        case STATE_OTA_CHECK: {
+#ifdef WAVESHARE_HW
+            OtaStatus ota = g_ota.getStatus();
+            bool busy = (ota == OTA_DOWNLOADING || ota == OTA_SUCCESS);
+            if (!busy) {
+                if (btnR_held && ota == OTA_AVAILABLE) {
+                    g_ota.startUpdate();
+                } else if (btnR) {
+                    g_state = STATE_IDLE;
+                    break;
+                } else if (millis() - g_otaLastMs >= OTA_TIMEOUT_MS) {
+                    g_state = STATE_IDLE;
+                    break;
+                }
+                if (btnR || btnL) g_otaLastMs = millis();  // reset timeout on any press
+            }
+#else
+            g_state = STATE_IDLE;
+#endif
             break;
         }
 

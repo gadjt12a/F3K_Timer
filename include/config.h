@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "fw_version.h"
 
 // ── Working-time defaults (seconds) ──────────────────────────────────────────
 #define DEFAULT_WORKING_TIME    600   // 10 minutes
@@ -41,6 +42,23 @@ static const int ALERT_COUNT   = 14;
 // ── Flight log ────────────────────────────────────────────────────────────────
 #define MAX_FLIGHTS             10
 
+// ── OTA update status ─────────────────────────────────────────────────────────
+enum OtaStatus : uint8_t {
+    OTA_IDLE,
+    OTA_CHECKING,
+    OTA_UP_TO_DATE,
+    OTA_AVAILABLE,
+    OTA_DOWNLOADING,
+    OTA_SUCCESS,
+    OTA_FAILED,
+    OTA_NO_WIFI
+};
+
+// ── OTA server (base station HTTP, same AP as timer comms) ────────────────────
+#define OTA_VERSION_URL  "http://" BASE_HOST ":8080/ota/version.json"
+#define OTA_FIRMWARE_URL "http://" BASE_HOST ":8080/ota/firmware.bin"
+#define OTA_TIMEOUT_MS   8000   // auto-exit OTA screen after 8s inactivity
+
 // ── Application states ────────────────────────────────────────────────────────
 enum AppState : uint8_t {
     STATE_IDLE,
@@ -50,6 +68,7 @@ enum AppState : uint8_t {
     STATE_WORKING_TIME_EXPIRED,
     STATE_SETTINGS,
     STATE_TASK_SELECT,          // settings page 2: choose F3K or F5K task type
+    STATE_OTA_CHECK,            // settings page 3: check / apply OTA firmware update
     STATE_PILOT_SELECT,         // connected to base: choose pilot before each round
     STATE_COUNTDOWN,            // base sent COUNT 10..1: green arc countdown to WT start
     STATE_ALTITUDE_ENTRY,       // F5K only: enter altitude (m) after each flight
