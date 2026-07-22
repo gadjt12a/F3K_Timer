@@ -1,0 +1,7 @@
+version : fw-v10
+date    : 2026-07-22 19:08
+commit  : e081ff75cce67665c59d7c322e4d8fbe5fe0dc53
+
+Flash (esptool):
+  --chip esp32s3 --baud 921600 write_flash
+  0x00000 bootloader.bin  0x08000 partitions.bin  0x10000 firmware.bin
