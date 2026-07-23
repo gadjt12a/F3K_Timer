@@ -81,27 +81,23 @@ hardware but are no longer the primary mechanism.
 
 ---
 
-## Build Environments
+## Build Environment
 
-Two environments exist in `platformio.ini`. Never mix their libraries or code paths.
+One environment: `[env:waveshare]` — real hardware only.
 
-### `[env:wokwi]` — Simulation (current active env)
+The Wokwi simulation environment (`[env:wokwi]`) was retired in session 30 once the
+round AMOLED hardware was the verified target. Config and circuit files are archived
+locally in `archive/wokwi/` (not in git). `#ifdef WOKWI_SIM` guards remain in source
+files as inert dead code — do not remove them in targeted edits but do not add new ones.
+
+### `[env:waveshare]`
 - Board: `esp32-s3-devkitc-1`
-- Display: ILI9341 240×320 via SPI (Wokwi proxy — rectangular, NOT round)
-- Buttons: Two GPIO pushbuttons — PIN_A=16, PIN_B=17
-- Audio: **No-op** — Tones stub only
-- Touch: Not used — button GPIOs replace gestures
-- Build flag: `-DWOKWI_SIM=1`
-- Libraries: Adafruit ILI9341, Adafruit GFX, Adafruit BusIO
-
-### `[env:waveshare]` — Real hardware
-- Board: `esp32-s3-devkitc-1` or equivalent ESP32-S3 target
 - Display: CO5300 466×466 ROUND AMOLED via QSPI — rendered with **Arduino_GFX**
 - Display rotation: `setRotation(1)` — 90° clockwise so buttons are at 12 o'clock
 - Buttons: **Button A** = PWR via AXP2101 IRQ; **Button B** = GPIO0 (BOOT button)
 - Audio: ES8311 via I2S — full tone generation
 - Touch: CST9217 via SensorLib — swipe gestures as supplementary input only
-- Build flag: `-DWAVESHARE_HW=1` (no `WOKWI_SIM` flag)
+- Build flag: `-DWAVESHARE_HW=1`
 - Libraries: Arduino_GFX_Library, XPowersLib, SensorLib
 
 > See `docs/HARDWARE_ENV.md` for the complete `[env:waveshare]` platformio.ini block
@@ -121,16 +117,7 @@ Two environments exist in `platformio.ini`. Never mix their libraries or code pa
 | Audio codec      | `ESP8311` via I2S (see `Tones.cpp`) | M5Unified speaker, tone()      |
 | Preferences/NVS  | `Preferences` (Arduino)      | SPIFFS, LittleFS                    |
 
-### Wokwi sim env (`WOKWI_SIM`)
-
-| Purpose          | USE                          | DO NOT USE                          |
-|------------------|------------------------------|-------------------------------------|
-| Display render   | `Adafruit_ILI9341`           | Arduino_GFX, M5GFX                  |
-| Buttons          | `digitalRead(PIN_A/B)`       | XPowersLib, SensorLib               |
-| Audio            | Stub only — no output        | I2S, ES8311, any audio lib          |
-| Touch            | Not applicable in sim        | CST9217, SensorLib touch            |
-
-### Always forbidden (either env)
+### Always forbidden
 
 - `M5Unified`, `M5GFX`, `M5IOE1`, `M5PM1` — M5Stack ecosystem, wrong hardware
 - `delay()` inside audio callbacks or display update loops — blocks the timer
@@ -158,9 +145,9 @@ I2C Bus (shared — all chips)    I2S_WS     GPIO45
   SDA         GPIO15            I2S_DO     GPIO10
   SCL         GPIO14            I2S_DI     GPIO8
                                 PA_EN      GPIO46 (active HIGH)
-Buttons (hardware)            Buttons (Wokwi sim)
-  BTN_A  AXP2101 power-key     BTN_A_SIM   GPIO16
-  BTN_B  GPIO0  (BOOT button)  BTN_B_SIM   GPIO17
+Buttons (hardware)
+  BTN_A  AXP2101 power-key
+  BTN_B  GPIO0  (BOOT button)
 ```
 
 ---
@@ -192,7 +179,7 @@ Buttons (hardware)            Buttons (Wokwi sim)
   ```cpp
   pinMode(BTN_B_HW_PIN, INPUT_PULLUP);   // BTN_B_HW_PIN = 0
   ```
-- Standard `digitalRead` + debounce in `Buttons::update()` — same pattern as sim
+- Standard `digitalRead` + debounce in `Buttons::update()`
 - **Startup caveat:** do not hold GPIO0 LOW while powering on. Document for users.
 
 **Touch gestures (CST9217) — supplementary only**
@@ -206,13 +193,7 @@ Buttons (hardware)            Buttons (Wokwi sim)
   int rotY = (466 - touch_x_raw);
   ```
 
-### Wokwi sim (`WOKWI_SIM`)
-
-- GPIO16 (green button) = Button A
-- GPIO17 (blue button)  = Button B
-- Same `Buttons` API — `#ifdef WOKWI_SIM` guard selects the implementation
-
-### Debounce constants (both envs)
+### Debounce constants
 
 ```cpp
 DEBOUNCE_MS      50
@@ -291,30 +272,27 @@ OTA_CHECK  (page 3 of 3: firmware update — hardware only)
   → [R click]       → IDLE (exit)
   → [8s inactivity] → IDLE (auto-exit)
   States: CHECKING... | UP TO DATE | fw-vN AVAIL | LOADING X% | DONE REBOOTING | FAILED | NO WIFI
-  OTA is disabled in Wokwi sim (TASK_SELECT goes directly to IDLE in sim build)
+  OTA only available on real hardware (WAVESHARE_HW)
 ```
 
 ---
 
 ## Display
 
-### Overview of current implementation state
+### Implementation
 
-- **`[env:wokwi]` path in `UI.cpp`**: Fully implemented for ILI9341 240×320 rectangular display.
-- **`[env:waveshare]` path in `UI.cpp`**: **Fully implemented and working on real hardware.** Uses `Arduino_Canvas` for software rotation (CO5300 does not support hardware rotation). Custom `ws_fillRing()` and `ws_eraseRingRadial()` helpers work around CO5300 QSPI not supporting `writeFastHLine`. Typography uses FreeFonts from the GFX Library for Arduino (resolved via the library include path — the `fonts/` directory in the lib provides them).
+`UI.cpp` targets the CO5300 466×466 round AMOLED via `Arduino_GFX`. Uses `Arduino_Canvas`
+for software rotation (CO5300 does not support hardware rotation). Custom `ws_fillRing()`
+and `ws_eraseRingRadial()` work around CO5300 QSPI not supporting `writeFastHLine`.
+Typography uses FreeFonts from the GFX Library for Arduino (resolved via the library
+include path — the `fonts/` directory in the lib provides them).
 
-### Config constants (set per environment via build flags)
+### Config constants
 
 ```cpp
-// Hardware (waveshare)
 DISPLAY_WIDTH    466     DISPLAY_CX   233
 DISPLAY_HEIGHT   466     DISPLAY_CY   233
 ARC_OUTER_RADIUS 220     ARC_INNER_RADIUS 200
-
-// Wokwi sim
-DISPLAY_WIDTH    240     DISPLAY_CX   120
-DISPLAY_HEIGHT   320     DISPLAY_CY   160
-ARC_OUTER_RADIUS 110     ARC_INNER_RADIUS  95
 ```
 
 ### Display rotation (waveshare only)
@@ -339,10 +317,7 @@ relative to the rotated top.
 
 ## Round Display Constraints — WAVESHARE HARDWARE ONLY
 
-> **These rules apply exclusively to the `[env:waveshare]` render path.**
-> The Wokwi ILI9341 proxy is rectangular — these constraints do NOT apply there.
-> When building any new screen for waveshare, read this section first. Every draw
-> call must comply before commit.
+> Read this section before implementing any new screen. Every draw call must comply before commit.
 
 ### Physical facts
 
@@ -350,9 +325,7 @@ relative to the rotated top.
 - Centre: (233, 233) — all layout is radially symmetric about this point
 - Physical clip radius: 233 px — hardware clips the framebuffer to a circle
 - CO5300 driver writes to the full 466×466 buffer. The corners ARE written but are
-  physically absent on the real panel. They look fine in Wokwi sim (rectangular proxy).
-- **Wokwi does NOT enforce the round clip** — corner content appears valid in sim but
-  is invisible on real hardware. Always validate new screens on the device.
+  physically absent on the real panel. Always validate new screens on the device.
 
 ### Safe zones
 
@@ -443,9 +416,7 @@ Arc ring (r ARC_INNER_RADIUS–ARC_OUTER_RADIUS):
 
 When implementing `UI.cpp` for `WAVESHARE_HW`:
 
-- Write all waveshare render functions inside `#else` of `#ifdef WOKWI_SIM` guards
-- Do NOT share Y-coordinate constants between wokwi and waveshare paths
-- Define waveshare layout constants separately:
+- Define layout constants under `#ifdef WAVESHARE_HW`:
   ```cpp
   #ifdef WAVESHARE_HW
   static const int WS_CX = 233;
@@ -489,7 +460,7 @@ Additional tones:
 | Window open (START from COUNT) | `playWindowOpen()`  | 1200      | 1200ms   |
 
 - Alert triggers are checked in `WorkingTime::update()` — fire-once flags per point
-- Tone generation: I2S DMA with sine wave buffer (hardware); stub (Wokwi)
+- Tone generation: I2S DMA with sine wave buffer via ES8311
 - Speaker amp: `digitalWrite(PA_EN, HIGH)` before playback, `LOW` when idle
 - **Never use `delay()` in tone generation** — use non-blocking DMA or FreeRTOS task
 
@@ -497,20 +468,11 @@ Additional tones:
 
 ## Code Guard Pattern
 
-All hardware-specific code must be wrapped:
-
-```cpp
-#ifdef WOKWI_SIM
-    // Wokwi / ILI9341 / GPIO button path — rectangular display
-#else
-    // Waveshare hardware / CO5300 / AXP2101+GPIO0 / touch gesture path — ROUND display
-#endif
-```
-
-The `Buttons` class is the primary place this pattern appears. `UI.cpp` uses it
-for display initialisation (different GFX constructors and render logic). `Tones.cpp`
-uses it for I2S vs stub. Keep the guard at the implementation level — the `.h`
-interfaces stay identical between environments.
+The codebase contains `#ifdef WOKWI_SIM` / `#else` / `#endif` guards from when the
+Wokwi sim was active. The sim was retired in session 30. These guards are now inert
+dead code — the `WOKWI_SIM` flag is never defined. Do not remove them in targeted edits
+(too much churn for no runtime benefit) but do not add new ones. New hardware-specific
+code should use `#ifdef WAVESHARE_HW` directly.
 
 ---
 
@@ -556,10 +518,8 @@ drops during WORKING will rejoin and start the full working time from scratch
 ```
 f3k-timer/
   CLAUDE.md                   <- this file -- read before any change
-  platformio.ini              <- [env:wokwi] active; [env:waveshare] in docs/HARDWARE_ENV.md
+  platformio.ini              <- [env:waveshare] only; see docs/HARDWARE_ENV.md
   partitions_f3k_ota.csv      <- custom 16 MB dual-OTA partition table (ota_0+ota_1, 3 MB each)
-  wokwi.toml                  <- Wokwi simulator config
-  diagram.json                <- Wokwi circuit diagram
   firmware/
     releases/                 <- last 5 compiled waveshare builds, each in fw-vN/ subfolder
                                  contents: firmware.bin, bootloader.bin, partitions.bin, release.txt
@@ -577,14 +537,12 @@ f3k-timer/
       FlightTimer.h/.cpp      <- individual flight stopwatch
       FlightLog.h/.cpp        <- flight list, scratch, best-time index
     display/
-      UI.h/.cpp               <- screen layout, render dispatcher
-                                 Wokwi path: implemented (rectangular ILI9341)
-                                 Waveshare path: fully implemented (round CO5300, radial layout)
+      UI.h/.cpp               <- screen layout, render dispatcher (round CO5300, radial layout)
       ArcRenderer.h/.cpp      <- CCW arc ring, colour thresholds
     input/
-      Buttons.h/.cpp          <- PWR+GPIO0 (HW) or GPIO16/17 (sim) -- same API
+      Buttons.h/.cpp          <- PWR key (AXP2101) + GPIO0 (BOOT button)
     audio/
-      Tones.h/.cpp            <- I2S sine wave alerts (HW) or stub (sim)
+      Tones.h/.cpp            <- I2S sine wave alerts via ES8311
     ota/
       OtaUpdater.h/.cpp       <- async HTTPUpdate + version check via FreeRTOS tasks (HW only)
     storage/
@@ -627,33 +585,24 @@ f3k-timer/
    in `setup()`. Do not reinitialise per-peripheral.
 
 4. **Round display clipping** — corners are physically absent on the real panel.
-   Wokwi ILI9341 is rectangular — round clip is NOT enforced in sim.
    Always draw within r=210 from centre (233,233). Test on real hardware before finalising.
 
 5. **PSRAM allocation** — 8MB available. Use `ps_malloc()` for audio DMA buffers and
    any large sprite buffers. Standard `malloc()` / stack allocation for small objects.
 
-6. **Wokwi ILI9341 vs CO5300** — the SPI constructor signatures differ. The `UI.cpp`
-   init block must be guarded with `#ifdef WOKWI_SIM`. Never share the constructor.
-
-7. **Speaker amp enable** — `PA_EN` (GPIO46) must be driven HIGH before any I2S audio
+6. **Speaker amp enable** — `PA_EN` (GPIO46) must be driven HIGH before any I2S audio
    and LOW when idle. Forgetting this = no sound, no error.
 
-8. **No vibration motor** — remove any haptic/vibration code that appears. Audio-only alerts.
+7. **No vibration motor** — remove any haptic/vibration code that appears. Audio-only alerts.
 
-9. **`delay()` in audio/display** — forbidden. Use `millis()` deltas, FreeRTOS tasks,
+8. **`delay()` in audio/display** — forbidden. Use `millis()` deltas, FreeRTOS tasks,
    or I2S DMA callbacks for any time-based audio work.
 
-10. **Wokwi UI layout ≠ Waveshare UI layout** — The two render paths are fundamentally
-    different. Wokwi uses Y-coordinate constants for a 240×320 portrait layout. Waveshare
-    uses radial zone constants (WS_Y_*) for 466×466 round. Never share layout constants
-    between the two paths.
+9. **Touch coordinate rotation** — CST9217 reports raw coordinates for 0° orientation.
+   After `setRotation(1)`, apply: `rotX = y_raw; rotY = (466 - x_raw)` before using
+   touch coordinates for gesture detection or tap zone matching.
 
-11. **Touch coordinate rotation** — CST9217 reports raw coordinates for 0° orientation.
-    After `setRotation(1)`, apply: `rotX = y_raw; rotY = (466 - x_raw)` before using
-    touch coordinates for gesture detection or tap zone matching.
-
-12. **Partition table change requires full flash erase** — fw-v11 switched from
+10. **Partition table change requires full flash erase** — fw-v11 switched from
     `default_16MB.csv` to `partitions_f3k_ota.csv` (OTA dual-slot layout). Any device
     running fw-v10 or earlier must be erased before flashing fw-v11+:
     ```powershell
@@ -661,7 +610,7 @@ f3k-timer/
     ```
     After that, flash normally. Devices already on fw-v11+ can OTA-update without erasing.
 
-13. **OTA version mismatch loop** — If `firmware/ota/firmware.bin` was built with a
+11. **OTA version mismatch loop** — If `firmware/ota/firmware.bin` was built with a
     different `FW_VERSION` than `firmware/ota/version.json` claims, the device will
     always report an update available and re-flash itself with the same binary.
     Root cause: `fw_version.h` must be written with the new version BEFORE the build runs.
@@ -716,10 +665,7 @@ Compiled binaries exist from fw-v10 onward. fw-v1 through fw-v9 are source-only 
 See `docs/HARDWARE_ENV.md` for full setup. Quick reference:
 
 ```powershell
-# Wokwi sim (then use Wokwi VS Code extension to run)
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e wokwi
-
-# Hardware -- build only
+# Build only
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e waveshare
 
 # Hardware -- build and flash (device must be in download mode: hold BOOT, tap RESET, release BOOT)

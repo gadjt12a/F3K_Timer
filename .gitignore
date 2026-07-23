@@ -13,5 +13,8 @@
 # Wokwi trace files
 wokwi.vcd
 
+# Local archive (Wokwi sim files retired from git but kept on disk)
+archive/
+
 # Troubleshooting artifacts (firmware backups, debug images)
 Troubleshooting/
