@@ -5,7 +5,7 @@ enum CommsState : uint8_t {
     COMMS_IDLE,         // begin() not yet called
     COMMS_CONNECTING,   // WiFi or TCP connecting (5-min budget)
     COMMS_CONNECTED,    // WiFi + TCP up, protocol active
-    COMMS_FAILED        // gave up — reboot to retry
+    COMMS_FAILED        // unreachable since session 31 (retry is now endless); kept for ABI
 };
 
 class TimerComms {
@@ -62,7 +62,7 @@ private:
     static const unsigned long WIFI_ATTEMPT_MS       = 30000;  // restart WiFi every 30s within budget
     static const unsigned long TCP_RETRY_INTERVAL_MS = 5000;
     static const unsigned long PING_INTERVAL_MS      = 30000;
-    static const unsigned long RX_TIMEOUT_MS         = 90000;  // no PONG in 90s = dead socket
+    static const unsigned long RX_TIMEOUT_MS         = 45000;  // one missed 30s PONG + 15s grace = dead socket
 
     static const int RX_BUF_SIZE = 256;
     char _rxBuf[RX_BUF_SIZE];
@@ -81,6 +81,7 @@ private:
     void _parseLine(const char* line);
     void _parsePilots(const char* data);
     void _sendLine(const char* line);
+    void _sendOrQueue(const char* line);   // send if socket alive, else queue + force reconnect
     void _enqueue(const char* line);
     void _flushPending();
 #endif

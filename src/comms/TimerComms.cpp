@@ -42,13 +42,12 @@ void TimerComms::update() {
             break;
 
         case COMMS_CONNECTING:
-            // Give up after 5-minute total budget
+            // Budget expiry no longer terminal (session 31): field devices must
+            // recover if the base station comes back after a long outage. Log and
+            // start a fresh budget window, keep retrying forever.
             if (now - _budgetStartMs > CONNECT_BUDGET_MS) {
-                Serial.println("[COMMS] 5-minute budget exhausted — standalone mode (reboot to retry)");
-                _tcp.stop();
-                WiFi.disconnect();
-                _state = COMMS_FAILED;
-                break;
+                Serial.println("[COMMS] 5-minute budget elapsed — restarting connect cycle");
+                _budgetStartMs = now;
             }
             // Log WiFi status every 10s so we can see what the stack is doing
             if (WiFi.status() != WL_CONNECTED && now - _lastWifiStatusLogMs >= 10000) {
@@ -108,7 +107,7 @@ void TimerComms::update() {
             break;
 
         case COMMS_FAILED:
-            break;  // terminal — reboot to retry
+            break;  // unreachable since session 31 — kept for enum completeness
     }
 #endif
 }
@@ -131,8 +130,7 @@ void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
 #ifndef WOKWI_SIM
     char buf[64];
     snprintf(buf, sizeof(buf), "FLIGHT pilot=%d dur=%lu", pilotId, durationMs);
-    if (_state == COMMS_CONNECTED) _sendLine(buf);
-    else _enqueue(buf);
+    _sendOrQueue(buf);
 #endif
 }
 
@@ -140,8 +138,7 @@ void TimerComms::sendAltitude(int pilotId, int flightNo, int altM) {
 #ifndef WOKWI_SIM
     char buf[64];
     snprintf(buf, sizeof(buf), "ALTITUDE pilot=%d flight=%d alt=%d", pilotId, flightNo, altM);
-    if (_state == COMMS_CONNECTED) _sendLine(buf);
-    else _enqueue(buf);
+    _sendOrQueue(buf);
 #endif
 }
 
@@ -149,14 +146,36 @@ void TimerComms::sendSelect(int pilotId) {
 #ifndef WOKWI_SIM
     char buf[32];
     snprintf(buf, sizeof(buf), "SELECT pilot=%d", pilotId);
-    if (_state == COMMS_CONNECTED) _sendLine(buf);
-    else _enqueue(buf);
+    _sendOrQueue(buf);
 #endif
 }
 
 // ── Private — WiFi/TCP ────────────────────────────────────────────────────────
 
 #ifndef WOKWI_SIM
+
+// Send if the socket is genuinely alive, otherwise queue for flush on reconnect.
+// _state == COMMS_CONNECTED alone is NOT enough: on a silently dead socket
+// (no FIN/RST — e.g. base station power loss) _tcp.connected() stays true for up
+// to ~60s and writes are silently discarded by lwIP. The _tcp.connected() check
+// catches the explicit-close case immediately; if it fails while we still think
+// we're connected, force the reconnect path now instead of waiting for RX timeout.
+void TimerComms::_sendOrQueue(const char* line) {
+    if (_state == COMMS_CONNECTED && _tcp.connected()) {
+        _sendLine(line);
+        return;
+    }
+    _enqueue(line);
+    if (_state == COMMS_CONNECTED) {
+        Serial.println("[COMMS] Socket dead on send — forcing reconnect");
+        unsigned long now = millis();
+        _tcp.stop();
+        _budgetStartMs    = now;
+        _connectStartMs   = now;
+        _lastTcpAttemptMs = 0;
+        _state = COMMS_CONNECTING;
+    }
+}
 
 void TimerComms::_sendLine(const char* line) {
     _tcp.print(line);
