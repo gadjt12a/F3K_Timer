@@ -1,0 +1,11 @@
+F3K Timer fw-v12
+Date: 2026-07-24
+Source commit: e1dc82b9f96f3c7bcbfebdab6b58cc3f3ae1e7c3
+
+Flash addresses (esptool):
+  0x00000  bootloader.bin
+  0x08000  partitions.bin
+  0x10000  firmware.bin
+
+esptool command:
+  esptool.py --chip esp32s3 --port COM4 --baud 921600 write_flash 0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
