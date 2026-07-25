@@ -35,7 +35,10 @@ public:
                 int                altFlightNo     = 0,
                 int                altTotalFlights = 0,
                 bool               isF5K           = false,
-                int                timerId         = -1);
+                int                timerId         = -1,
+                int                auxRemainS      = 0,   // PREP/LANDING seconds remaining
+                int                auxTotalS       = 0,   // PREP/LANDING total (arc denominator)
+                bool               jumpedStart     = false);
 
     void renderHistory(int slot, const HistRound& hist, int totalSlots);
     void renderOtaCheck(OtaStatus status, int progress, const char* availVer);
@@ -55,6 +58,7 @@ private:
     int      _prevWtSecs   = -1;
     int      _prevFlashSecs = -1;
     bool     _arcVisible   = true;
+    bool     _jumped       = false;  // current flight was a jumped start (invalid)
     unsigned long _lastArcSweepMs = 0;  // For sub-second arc sweep animation
     int      _prevBatteryPct = -1;      // Track battery changes
 
@@ -89,7 +93,10 @@ private:
     void _drawAltitudeEntryInc(int altM);
     void _drawOtaCheck(OtaStatus status, int progress, const char* availVer);
     void _drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t size);
-    void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font);
+    void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font,
+                           uint8_t size = 1);
+    void _drawPrep(int remainS, int totalS, const char* pilotName);
+    void _drawLanding(int remainS, int totalS);
     void _updateArc(int remaining, int total);
     void _drawArc(int remaining, int total, uint16_t color);
     void _drawArcSegment(float startDeg, float endDeg, uint16_t color);

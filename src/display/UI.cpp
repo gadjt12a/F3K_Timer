@@ -113,10 +113,11 @@ void UI::_drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t 
 }
 
 // Draw text with a FreeFont (waveshare only for now)
-void UI::_drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font) {
+void UI::_drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font,
+                           uint8_t size) {
 #ifndef WOKWI_SIM
     _gfx->setFont(font);
-    _gfx->setTextSize(1);
+    _gfx->setTextSize(size);
     _gfx->setTextColor(color, COL_BG);
     _gfx->setTextWrap(false);
     int16_t x1, y1; uint16_t w, h;
@@ -466,8 +467,12 @@ void UI::render(AppState       state,
                 int                altFlightNo,
                 int                altTotalFlights,
                 bool               isF5K,
-                int                timerId)
+                int                timerId,
+                int                auxRemainS,
+                int                auxTotalS,
+                bool               jumpedStart)
 {
+    _jumped = jumpedStart;  // running screen shows JUMPED instead of FLYING
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
     bool isRunning     = (state == STATE_WORKING_TIME_RUNNING || state == STATE_FLIGHT_RUNNING);
@@ -591,6 +596,17 @@ void UI::render(AppState       state,
             }
             break;
         }
+
+        case STATE_PREP:
+            // Full redraw once per second (gated by _needsRender in main.cpp)
+            if (!screenChanged) _clearScreen();
+            _drawPrep(auxRemainS, auxTotalS, pilotName);
+            break;
+
+        case STATE_LANDING:
+            if (!screenChanged) _clearScreen();
+            _drawLanding(auxRemainS, auxTotalS);
+            break;
     }
 
 #ifndef WOKWI_SIM
@@ -763,9 +779,10 @@ void UI::_drawRunningFull(bool flightActive,
     uint16_t flCol = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
     _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, flCol, &FreeMonoBold24pt7b);
 
-    // State indicator (FLYING/WAIT) in middle
-    _drawFontCentered(flightActive ? "FLYING" : "WAIT", WS_CX, WS_Y_STATE,
-                      flightActive ? COL_GREEN : COL_GRAY, &FreeSansBold18pt7b);
+    // State indicator (FLYING/JUMPED/WAIT) in middle
+    _drawFontCentered(flightActive ? (_jumped ? "JUMPED" : "FLYING") : "WAIT", WS_CX, WS_Y_STATE,
+                      flightActive ? (_jumped ? COL_RED : COL_GREEN) : COL_GRAY,
+                      &FreeSansBold18pt7b);
 
     // Flight log (3 best times) in middle
     _drawFlightLog(log);
@@ -835,10 +852,11 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
     _gfx->fillRect(WS_CX - 120, WS_Y_FL_DIGITS - 35, 240, 70, COL_BG);
     _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, col, &FreeMonoBold24pt7b);
 
-    // Update state label (FLYING/WAIT) — only changes when flight state changes
+    // Update state label (FLYING/JUMPED/WAIT) — only changes when flight state changes
     _gfx->fillRect(WS_CX - 100, WS_Y_STATE - 25, 200, 50, COL_BG);
-    _drawFontCentered(flightActive ? "FLYING" : "WAIT", WS_CX, WS_Y_STATE,
-                      flightActive ? COL_GREEN : COL_GRAY, &FreeSansBold18pt7b);
+    _drawFontCentered(flightActive ? (_jumped ? "JUMPED" : "FLYING") : "WAIT", WS_CX, WS_Y_STATE,
+                      flightActive ? (_jumped ? COL_RED : COL_GREEN) : COL_GRAY,
+                      &FreeSansBold18pt7b);
 
     // Redraw flight log (new flight may have been recorded)
     _gfx->fillRect(WS_CX - 100, WS_Y_LOG_START - 10, 200, WS_Y_LOG_STEP * 3 + 20, COL_BG);
@@ -860,6 +878,51 @@ void UI::_drawExpired(const FlightLog& log) {
     // All flight times below - includes scratched in red with strikethrough
     _drawFlightLogExpired(log, 130, 8);
     _drawFontCentered("R = RESTART", WS_CX, 420, COL_GRAY, &FreeSans12pt7b);
+#endif
+}
+
+// ── Prep countdown (base-driven, yellow arc) ─────────────────────────────────
+
+void UI::_drawPrep(int remainS, int totalS, const char* pilotName) {
+    // Yellow arc — same geometry/behaviour as the WT arc, prep colour
+    _drawArc(remainS, totalS, COL_YELLOW);
+    char buf[8];
+    if (remainS > 10) {
+        snprintf(buf, sizeof(buf), "%d:%02d", remainS / 60, remainS % 60);
+#ifdef WOKWI_SIM
+        _drawCentered("PREP TIME", DISPLAY_CX, DISPLAY_CY - 50, COL_YELLOW, 2);
+        _drawCentered(buf,         DISPLAY_CX, DISPLAY_CY,      COL_WHITE,  4);
+        if (pilotName && pilotName[0])
+            _drawCentered(pilotName, DISPLAY_CX, DISPLAY_CY + 50, COL_GRAY, 1);
+#else
+        _drawFontCentered("PREP TIME", WS_CX, 130, COL_YELLOW, &FreeSansBold18pt7b);
+        _drawFontCentered(buf, WS_CX, WS_CY + 10, COL_WHITE, &FreeMonoBold24pt7b, 2);
+        if (pilotName && pilotName[0])
+            _drawFontCentered(pilotName, WS_CX, 360, COL_GRAY, &FreeSans12pt7b);
+#endif
+    } else {
+        // Final 10 s — huge digits inside the arc; this is the competition start
+        snprintf(buf, sizeof(buf), "%d", remainS);
+#ifdef WOKWI_SIM
+        _drawCentered(buf, DISPLAY_CX, DISPLAY_CY, COL_WHITE, 10);
+#else
+        _drawFontCentered(buf, WS_CX, WS_CY, COL_WHITE, &FreeSansBold24pt7b, 4);
+#endif
+    }
+}
+
+// ── Landing window countdown (base-driven, orange arc) ───────────────────────
+
+void UI::_drawLanding(int remainS, int totalS) {
+    _drawArc(remainS, totalS, COL_ORANGE);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d", remainS);
+#ifdef WOKWI_SIM
+    _drawCentered("LANDING", DISPLAY_CX, DISPLAY_CY - 60, COL_ORANGE, 2);
+    _drawCentered(buf,       DISPLAY_CX, DISPLAY_CY + 10, COL_WHITE,  8);
+#else
+    _drawFontCentered("LANDING", WS_CX, 120, COL_ORANGE, &FreeSansBold18pt7b);
+    _drawFontCentered(buf, WS_CX, WS_CY + 20, COL_WHITE, &FreeSansBold24pt7b, 3);
 #endif
 }
 

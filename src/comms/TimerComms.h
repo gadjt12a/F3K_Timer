@@ -23,16 +23,21 @@ public:
     bool hasTaskUpdate();       // base sent TASK — read getTaskWtSeconds() before next update
     bool hasPilotList();        // base sent PILOTS
     bool hasCountdown();        // base sent COUNT N — read getCountdownN() before next call
+    bool hasPrepStart();        // base sent PREP t=N — read getPrepSeconds() before next call
+    bool hasLandStart();        // base sent LAND t=N — read getLandSeconds() before next call
 
     int  getTaskWtSeconds() const { return _taskWtSeconds; }
     int  getTimerId()       const { return _timerId; }
     int  getCountdownN()    const { return _countdownN; }
+    int  getPrepSeconds()   const { return _prepSeconds; }
+    int  getLandSeconds()   const { return _landSeconds; }
     bool isF5K()            const { return _isF5K; }
 
     int          getPilotCount()    const { return _pilotCount; }
     const Pilot& getPilot(int idx)  const { return _pilots[idx]; }
 
     void sendFlight(int pilotId, unsigned long durationMs);
+    void sendJumped(int pilotId, unsigned long durationMs);  // jumped start — CD note only
     void sendAltitude(int pilotId, int flightNo, int altM);
     void sendSelect(int pilotId);
 
@@ -49,7 +54,11 @@ private:
     bool _hasTaskUpdate   = false;
     bool _hasPilotList    = false;
     bool _hasCountdown    = false;
+    bool _hasPrepStart    = false;
+    bool _hasLandStart    = false;
     int  _countdownN      = 0;
+    int  _prepSeconds     = 0;
+    int  _landSeconds     = 0;
 
     unsigned long _budgetStartMs       = 0;  // start of current 5-min connect window
     unsigned long _connectStartMs      = 0;  // start of current WiFi attempt (60s each)

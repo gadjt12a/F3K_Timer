@@ -72,8 +72,14 @@ enum AppState : uint8_t {
     STATE_PILOT_SELECT,         // connected to base: choose pilot before each round
     STATE_COUNTDOWN,            // base sent COUNT 10..1: green arc countdown to WT start
     STATE_ALTITUDE_ENTRY,       // F5K only: enter altitude (m) after each flight
-    STATE_HISTORY               // browse last HIST_SLOTS rounds from NVS
+    STATE_HISTORY,              // browse last HIST_SLOTS rounds from NVS
+    STATE_PREP,                 // base sent PREP t=N: yellow prep-time countdown to WT start
+    STATE_LANDING               // base sent LAND t=N: landing-window countdown after WT end
 };
+
+// ── Prep countdown (base-station driven) ─────────────────────────────────────
+#define PREP_UNLOCK_S        2     // R button unlocks this many s before WT start
+#define PREP_START_GRACE_MS  3000  // prep hit 0 but no START from base — start locally
 
 // ── Base station connection state (for UI indicator) ─────────────────────────
 enum BaseConnState : uint8_t {

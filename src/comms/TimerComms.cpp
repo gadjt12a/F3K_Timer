@@ -79,6 +79,10 @@ void TimerComms::update() {
                     _tcp.stop();
                     Serial.printf("[COMMS] TCP connect attempt → %s:%d\n", BASE_HOST, BASE_PORT);
                     if (_tcp.connect(BASE_HOST, BASE_PORT)) {
+                        // Re-apply power save disable after WPA association. The IDF
+                        // resets to WIFI_PS_MIN_MODEM during the handshake, so calling
+                        // this only in begin() is not enough — re-apply once TCP is up.
+                        WiFi.setSleep(false);
                         Serial.printf("[COMMS] Connected (IP %s)\n", WiFi.localIP().toString().c_str());
                         _state = COMMS_CONNECTED;
                         _lastPingMs = now;
@@ -129,11 +133,21 @@ bool TimerComms::hasStopCommand()   { bool v = _hasStopCommand;   _hasStopComman
 bool TimerComms::hasTaskUpdate()    { bool v = _hasTaskUpdate;    _hasTaskUpdate    = false; return v; }
 bool TimerComms::hasPilotList()     { bool v = _hasPilotList;     _hasPilotList     = false; return v; }
 bool TimerComms::hasCountdown()     { bool v = _hasCountdown;     _hasCountdown     = false; return v; }
+bool TimerComms::hasPrepStart()     { bool v = _hasPrepStart;     _hasPrepStart     = false; return v; }
+bool TimerComms::hasLandStart()     { bool v = _hasLandStart;     _hasLandStart     = false; return v; }
 
 void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
 #ifndef WOKWI_SIM
     char buf[64];
     snprintf(buf, sizeof(buf), "FLIGHT pilot=%d dur=%lu", pilotId, durationMs);
+    _sendOrQueue(buf);
+#endif
+}
+
+void TimerComms::sendJumped(int pilotId, unsigned long durationMs) {
+#ifndef WOKWI_SIM
+    char buf[64];
+    snprintf(buf, sizeof(buf), "JUMPED pilot=%d dur=%lu", pilotId, durationMs);
     _sendOrQueue(buf);
 #endif
 }
@@ -238,6 +252,16 @@ void TimerComms::_parseLine(const char* line) {
         _countdownN  = atoi(line + 6);
         _hasCountdown = true;
         Serial.printf("[COMMS] Countdown: %d\n", _countdownN);
+
+    } else if (strncmp(line, "PREP t=", 7) == 0) {
+        _prepSeconds  = atoi(line + 7);
+        _hasPrepStart = true;
+        Serial.printf("[COMMS] Prep start: %ds\n", _prepSeconds);
+
+    } else if (strncmp(line, "LAND t=", 7) == 0) {
+        _landSeconds  = atoi(line + 7);
+        _hasLandStart = true;
+        Serial.printf("[COMMS] Landing window: %ds\n", _landSeconds);
 
     } else if (strcmp(line, "PONG") == 0) {
         // keepalive — _lastRxMs already updated above

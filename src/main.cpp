@@ -51,6 +51,18 @@ static int  g_selectedPilotIdx = 0;
 static int  g_selectedPilotId  = 0;
 static char g_selectedPilotName[MAX_PILOT_NAME + 1] = "";
 
+// Base-driven prep / landing countdowns (timer counts locally, COUNT re-syncs prep)
+static unsigned long g_prepEndMs   = 0;  // millis() deadline for prep = 0
+static unsigned long g_prepZeroMs  = 0;  // when prep first hit 0 (for no-START fallback)
+static int  g_prepTotalS  = 0;           // arc denominator (original prep duration)
+static int  g_prepDispS   = 0;           // currently displayed prep second
+static int  g_prepBeepS   = 0;           // last prep second beeped (avoid repeats)
+static unsigned long g_landEndMs   = 0;
+static int  g_landTotalS  = 0;
+static int  g_landDispS   = 0;
+static bool g_earlyFlight = false;       // flight started during final 2s of prep
+static bool g_jumpedStart = false;       // flight launched before the WT long beep — invalid
+
 static void onAlert(int timeRemaining, void*) { g_tones.playAlert(timeRemaining); }
 
 // ── Render gating ─────────────────────────────────────────────────────────────
@@ -70,6 +82,8 @@ static int           _lastAltFlightNo = -1;
 static bool          _lastIsF5K       = false;
 static int           _lastTimerId     = -2;  // -2 = "never rendered"
 static int           _lastHistSlot    = -1;
+static int           _lastPrepDispS   = -1;
+static int           _lastLandDispS   = -1;
 #ifdef WAVESHARE_HW
 static OtaStatus     _lastOtaStatus   = OTA_IDLE;
 static int           _lastOtaProg10   = -1;  // progress in 10% increments
@@ -95,6 +109,8 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
         if (wtSecs <= ARC_RED_THRESHOLD && wtSecs > 0) return millis() >= _nextFlashMs;
     }
     if (state == STATE_COUNTDOWN)      return g_countdownN != _lastCountdownN;
+    if (state == STATE_PREP)           return g_prepDispS  != _lastPrepDispS;
+    if (state == STATE_LANDING)        return g_landDispS  != _lastLandDispS;
     if (state == STATE_ALTITUDE_ENTRY) return g_altitudeM != _lastAltitudeM || g_altFlightNo != _lastAltFlightNo;
     return false;
 }
@@ -121,10 +137,12 @@ static void _doRender(AppState state, int wtSecs) {
     int battPct    = g_btns.getBatteryPercent();
     bool charging  = g_btns.isCharging();
     const char* pilot = (g_selectedPilotName[0] != '\0') ? g_selectedPilotName : nullptr;
+    int auxRemainS = (state == STATE_LANDING) ? g_landDispS  : g_prepDispS;
+    int auxTotalS  = (state == STATE_LANDING) ? g_landTotalS : g_prepTotalS;
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
                 battPct, charging, pilot, g_comms.baseConnState(), g_countdownN,
                 g_altitudeM, g_altFlightNo, g_log.count(), g_isF5K,
-                g_comms.getTimerId());
+                g_comms.getTimerId(), auxRemainS, auxTotalS, g_jumpedStart);
     _lastState      = state;
     _lastWtSecs     = wtSecs;
     _lastWtMinutes  = g_wtMinutes;
@@ -135,6 +153,8 @@ static void _doRender(AppState state, int wtSecs) {
     _lastAltFlightNo = g_altFlightNo;
     _lastIsF5K       = g_isF5K;
     _lastTimerId     = g_comms.getTimerId();
+    _lastPrepDispS   = g_prepDispS;
+    _lastLandDispS   = g_landDispS;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
@@ -194,21 +214,39 @@ static void _selectPilot(int idx) {
     g_selectedPilotName[MAX_PILOT_NAME] = '\0';
 }
 
-// Helper: start a round (shared between button and base station START command)
-static void _startRound(bool withFlight) {
+// Helper: start a round (shared between button and base station START command).
+// preserveFlight: a flight is already running (early launch during prep) — keep it.
+static void _startRound(bool withFlight, bool preserveFlight = false) {
     g_wt.reset();
     g_wt.begin(g_wtMinutes * 60);
     g_wt.start();
     g_log.reset();
-    g_ft.reset();
+    if (!preserveFlight) g_ft.reset();
     g_altFlightNo = 0;
     g_altitudeM   = 0;
     g_history.startRound(g_isF5K, g_selectedPilotName);
     if (withFlight) {
-        g_ft.start();
+        if (!preserveFlight) g_ft.start();
         g_state = STATE_FLIGHT_RUNNING;
     } else {
         g_state = STATE_WORKING_TIME_RUNNING;
+    }
+}
+
+// Helper: stop the running flight and record it. A jumped start (launched before
+// the WT long beep) is logged but immediately scratched — invalid flight — and is
+// NOT sent to the base station or NVS round history.
+static void _recordFlight() {
+    unsigned long dur = g_ft.stop();
+    g_log.addFlight(dur);
+    if (g_jumpedStart) {
+        g_log.scratchLast();
+        g_jumpedStart = false;
+        g_comms.sendJumped(g_selectedPilotId, dur);  // CD note only — never scored
+        Serial.printf("[MAIN] Jumped start — flight %.2fs invalidated\n", dur / 1000.0f);
+    } else {
+        g_history.recordFlight(dur);
+        g_comms.sendFlight(g_selectedPilotId, dur);
     }
 }
 
@@ -233,30 +271,78 @@ void loop() {
         g_state = STATE_PILOT_SELECT;
     }
 
-    if (g_comms.hasCountdown() &&
-        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT || g_state == STATE_COUNTDOWN)) {
-        g_countdownN = g_comms.getCountdownN();
-        g_tones.playAlert(g_countdownN);  // short beep each second
-        g_state = STATE_COUNTDOWN;
+    // PREP t=N — base started (or skipped within) the preparation countdown
+    if (g_comms.hasPrepStart()) {
+        int t = g_comms.getPrepSeconds();
+        if (g_state == STATE_PREP) {
+            // Skip/re-sync mid-prep: jump the deadline, keep the original arc total
+            g_prepEndMs = millis() + (unsigned long)t * 1000UL;
+            g_prepBeepS = t + 1;
+            g_prepZeroMs = 0;
+        } else if (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT ||
+                   g_state == STATE_COUNTDOWN || g_state == STATE_WORKING_TIME_EXPIRED ||
+                   g_state == STATE_LANDING) {
+            g_prepEndMs   = millis() + (unsigned long)t * 1000UL;
+            g_prepTotalS  = t;
+            g_prepBeepS   = t + 1;
+            g_prepZeroMs  = 0;
+            g_earlyFlight = false;
+            g_jumpedStart = false;
+            g_ft.reset();
+            g_state = STATE_PREP;
+            Serial.printf("[MAIN] Prep countdown started: %ds\n", t);
+        }
+    }
+
+    if (g_comms.hasCountdown()) {
+        int n = g_comms.getCountdownN();
+        if (g_state == STATE_PREP) {
+            // Base tick for the last 10s — re-sync the local prep clock to it
+            g_prepEndMs = millis() + (unsigned long)n * 1000UL;
+        } else if (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT ||
+                   g_state == STATE_COUNTDOWN) {
+            // Fallback path (no PREP received, e.g. connected mid-prep on old base)
+            g_countdownN = n;
+            g_tones.playAlert(g_countdownN);  // short beep each second
+            g_state = STATE_COUNTDOWN;
+        }
     }
 
     if (g_comms.hasStartCommand() &&
-        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT || g_state == STATE_COUNTDOWN)) {
-        if (g_state == STATE_COUNTDOWN) g_tones.playWindowOpen();
-        _startRound(false);
+        (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT ||
+         g_state == STATE_COUNTDOWN || g_state == STATE_PREP)) {
+        if (g_state == STATE_COUNTDOWN || g_state == STATE_PREP) g_tones.playWindowOpen();
+        // An early launch during prep (last 2s) keeps its running flight timer
+        _startRound(g_earlyFlight, g_earlyFlight);
+        g_earlyFlight = false;
     }
 
-    if (g_comms.hasStopCommand() &&
-        (g_state == STATE_WORKING_TIME_RUNNING || g_state == STATE_FLIGHT_RUNNING)) {
-        if (g_state == STATE_FLIGHT_RUNNING) {
-            unsigned long dur = g_ft.stop();
-            g_log.addFlight(dur);
-            g_history.recordFlight(dur);
-            g_comms.sendFlight(g_selectedPilotId, dur);
+    if (g_comms.hasStopCommand()) {
+        if (g_state == STATE_WORKING_TIME_RUNNING || g_state == STATE_FLIGHT_RUNNING) {
+            if (g_state == STATE_FLIGHT_RUNNING) _recordFlight();
+            g_wt.reset();
+            g_tones.silence();
+            g_state = STATE_WORKING_TIME_EXPIRED;
+        } else if (g_state == STATE_PREP || g_state == STATE_COUNTDOWN ||
+                   g_state == STATE_LANDING) {
+            // CD aborted the round
+            g_ft.stop();
+            g_wt.reset();
+            g_tones.silence();
+            g_earlyFlight = false;
+            g_jumpedStart = false;
+            g_state = STATE_IDLE;
         }
-        g_wt.reset();
-        g_tones.silence();
-        g_state = STATE_WORKING_TIME_EXPIRED;
+    }
+
+    // LAND t=N — landing window countdown after WT end (STOP always precedes it)
+    if (g_comms.hasLandStart() &&
+        (g_state == STATE_WORKING_TIME_EXPIRED || g_state == STATE_IDLE)) {
+        g_landTotalS = g_comms.getLandSeconds();
+        g_landEndMs  = millis() + (unsigned long)g_landTotalS * 1000UL;
+        g_landDispS  = g_landTotalS;
+        g_state = STATE_LANDING;
+        Serial.printf("[MAIN] Landing window: %ds\n", g_landTotalS);
     }
 
     // Button mapping for Waveshare hardware:
@@ -296,6 +382,9 @@ void loop() {
                 // R hold: go to settings (check first to avoid triggering on release)
                 g_settingsLastMs = millis();
                 g_state = STATE_SETTINGS;
+            } else if (g_comms.isConnected()) {
+                // Connected to base: rounds are started by the base station only.
+                // WT start (L) and WT+flight start (R) are locked.
             } else if (btnR) {
                 // R click: start working time AND flight together
                 _startRound(true);
@@ -304,6 +393,49 @@ void loop() {
                 _startRound(false);
             }
             break;
+
+        case STATE_PREP: {
+            unsigned long nowP = millis();
+            long remMs = (long)(g_prepEndMs - nowP);
+            int  rem   = (remMs > 0) ? (int)((remMs + 999) / 1000) : 0;
+            g_prepDispS = rem;
+            // Beeps at 30, 15, 10..1; the long beep comes with START (window open)
+            if (rem != g_prepBeepS && rem > 0 &&
+                (rem == 30 || rem == 15 || rem <= 10)) {
+                g_tones.playAlert(rem);
+                g_prepBeepS = rem;
+            }
+            // R unlocks in the final 2s. Launching before the WT long beep is a
+            // jumped start — the flight runs but will be invalidated when stopped.
+            if (btnR && !g_earlyFlight && rem > 0 && rem <= PREP_UNLOCK_S) {
+                g_ft.reset();
+                g_ft.start();
+                g_earlyFlight = true;
+                g_jumpedStart = true;
+                Serial.println("[MAIN] Flight started during prep — JUMPED START");
+            }
+            // Fallback: prep hit 0 but no START from base (packet loss) — start locally
+            if (rem == 0) {
+                if (g_prepZeroMs == 0) {
+                    g_prepZeroMs = nowP;
+                } else if (nowP - g_prepZeroMs >= PREP_START_GRACE_MS) {
+                    Serial.println("[MAIN] No START after prep end — starting round locally");
+                    g_tones.playWindowOpen();
+                    _startRound(g_earlyFlight, g_earlyFlight);
+                    g_earlyFlight = false;
+                }
+            }
+            break;
+        }
+
+        case STATE_LANDING: {
+            long remMs = (long)(g_landEndMs - millis());
+            int  rem   = (remMs > 0) ? (int)((remMs + 999) / 1000) : 0;
+            g_landDispS = rem;
+            // R click skips ahead to the results screen
+            if (rem == 0 || btnR) g_state = STATE_WORKING_TIME_EXPIRED;
+            break;
+        }
 
         case STATE_WORKING_TIME_RUNNING:
             if (g_wt.isExpired()) { g_state = STATE_WORKING_TIME_EXPIRED; break; }
@@ -331,10 +463,7 @@ void loop() {
 
         case STATE_FLIGHT_RUNNING:
             if (g_wt.isExpired()) {
-                unsigned long dur = g_ft.stop();
-                g_log.addFlight(dur);
-                g_history.recordFlight(dur);
-                g_comms.sendFlight(g_selectedPilotId, dur);
+                _recordFlight();
                 g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
             }
@@ -343,15 +472,13 @@ void loop() {
                 g_ft.stop();
                 g_wt.reset();
                 g_tones.silence();
+                g_jumpedStart = false;
                 g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
             }
             if (btnR) {
                 // R click: stop flight and record time
-                unsigned long dur = g_ft.stop();
-                g_log.addFlight(dur);
-                g_history.recordFlight(dur);
-                g_comms.sendFlight(g_selectedPilotId, dur);
+                _recordFlight();
                 g_state = STATE_WORKING_TIME_RUNNING;
             }
             break;
