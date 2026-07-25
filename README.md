@@ -23,6 +23,10 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 - **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS/COUNT commands, reports FLIGHT/ALTITUDE/SELECT back; queues messages when disconnected and flushes on reconnect
 - **Pilot selection UI** — scrollable list driven by PILOTS command from base station; SELECT sent on confirm
 - **10-second countdown arc** — green sweep during pre-round countdown from base
+- **Base-driven prep countdown** — `PREP t=` starts a yellow arc over the full prep time with beeps at 30/15/10–1s and huge digits for the final 10s; COUNT re-syncs the clock; if START is lost, the round starts locally 3s after prep hits 0
+- **Start lockout when connected** — idle start buttons disabled (base station owns round starts); flight start unlocks in the final 2s of prep
+- **Jumped-start invalidation** — launching before the WT long beep runs the flight flagged JUMPED (red); on stop it is auto-scratched, kept out of history, and reported to the CD via `JUMPED` instead of `FLIGHT`
+- **Landing window countdown** — `LAND t=` after working time shows an orange arc with big seconds, then the results screen
 - **Timer ID display** — after ASSIGN, shows `T1` / `T2` etc. bold green on idle screen between battery indicator and GLIDE title
 - **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live; BASE OK replaced by pilot name once a pilot is selected
 - **NVS round history (ROUND RECALL)** — stores last 3 rounds (discipline, pilot name, flight times, F5K altitudes) to ESP32 NVS; each flight written immediately so data survives power loss mid-round; accessible via `STATE_HISTORY` from the expired screen (L) or settings chain; "N of 3" slot indicator, L=older / R=newer/exit, 8s inactivity timeout
@@ -55,8 +59,8 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 ```
 IDLE
   R hold       → SETTINGS
-  R click      → FLIGHT_RUNNING  (starts WT + flight together)
-  L click      → WORKING_TIME_RUNNING  (WT only — wait for launch)
+  R click      → FLIGHT_RUNNING  (starts WT + flight together; locked while connected to base)
+  L click      → WORKING_TIME_RUNNING  (WT only — wait for launch; locked while connected to base)
 
 WORKING_TIME_RUNNING
   R click      → FLIGHT_RUNNING
@@ -108,9 +112,21 @@ PILOT_SELECT  (base station only)
   L click      → previous pilot
   R hold       → confirm, → IDLE
 
-COUNTDOWN  (base station COUNT 10…1)
+COUNTDOWN  (base station COUNT 10…1, fallback when no PREP received)
   COUNT N      → display arc + beep
   START        → WORKING_TIME_RUNNING + long tone
+
+PREP  (base station PREP t=N — yellow arc prep countdown)
+  local countdown with beeps at 30, 15, 10…1; huge digits in last 10s
+  COUNT N      → re-sync local clock to base tick
+  R click      → early flight start (only in final 2s; flagged JUMPED — invalid)
+  START        → WORKING_TIME_RUNNING or FLIGHT_RUNNING (early flight kept) + long tone
+  STOP         → IDLE  (CD abort)
+  0 + 3s, no START → start round locally (packet-loss fallback)
+
+LANDING  (base station LAND t=N after WT end — orange arc)
+  R click / 0  → WORKING_TIME_EXPIRED  (results)
+  STOP         → IDLE  (CD abort)
 ```
 
 ## Base Station
