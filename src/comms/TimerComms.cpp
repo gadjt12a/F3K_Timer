@@ -96,6 +96,13 @@ void TimerComms::update() {
             break;
 
         case COMMS_CONNECTED:
+            // Re-assert no-sleep every 5s: IDF events (DHCP renew, internal scan,
+            // WPA group-key refresh) silently re-enable WIFI_PS_MIN_MODEM, which
+            // causes lwIP TCP sends to drop silently and inbound PONGs to be missed.
+            if (now - _lastSleepAssertMs >= 5000) {
+                WiFi.setSleep(false);
+                _lastSleepAssertMs = now;
+            }
             if (!_tcp.connected() || (now - _lastRxMs > RX_TIMEOUT_MS)) {
                 Serial.printf("[COMMS] TCP dropped: connected=%d rxAge=%lus\n",
                               (int)_tcp.connected(), (now - _lastRxMs) / 1000);
@@ -109,7 +116,19 @@ void TimerComms::update() {
             _readLines();
             if (now - _lastPingMs > PING_INTERVAL_MS) {
                 Serial.println("[COMMS] TX: PING");
-                _sendLine("PING");
+                size_t sent = _tcp.print("PING\n");
+                if (sent == 0) {
+                    // lwIP rejected the send (modem sleep, broken socket, etc.) —
+                    // force reconnect immediately instead of silently missing PINGs.
+                    Serial.println("[COMMS] PING send failed — forcing reconnect");
+                    _tcp.stop();
+                    _budgetStartMs    = now;
+                    _connectStartMs   = now;
+                    _lastTcpAttemptMs = 0;
+                    _state = COMMS_CONNECTING;
+                    break;
+                }
+                _tcp.flush();
                 _lastPingMs = now;
             }
             break;

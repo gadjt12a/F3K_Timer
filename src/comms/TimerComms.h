@@ -66,6 +66,7 @@ private:
     unsigned long _lastRxMs            = 0;
     unsigned long _lastTcpAttemptMs    = 0;
     unsigned long _lastWifiStatusLogMs = 0;
+    unsigned long _lastSleepAssertMs   = 0;  // last time WiFi.setSleep(false) was re-applied
 
     static const unsigned long CONNECT_BUDGET_MS     = 300000; // 5 min total before giving up
     static const unsigned long WIFI_ATTEMPT_MS       = 30000;  // restart WiFi every 30s within budget
