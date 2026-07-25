@@ -18,9 +18,11 @@ void TimerComms::begin() {
     // flash reset (RTS/EN toggle). Without this, the stack can get stuck in an
     // intermediate state and never scan for the AP.
     WiFi.persistent(false);  // RAM-only: skip stale NVS channel/BSSID cache
+    WiFi.disconnect(true);   // tear down lwIP fully (clears any cached IP/DHCP state)
     WiFi.mode(WIFI_OFF);
-    delay(100);
+    delay(500);              // 500ms: allow modem to fully power down before restart
     WiFi.mode(WIFI_STA);
+    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);  // force DHCP (don't use cached IP)
     // Disable WiFi modem sleep. With sleep on (the default), the radio dozes during
     // quiet periods (e.g. the prep countdown) and drops the TCP link ~1 min in, forcing
     // a reconnect that loses the selected pilot mid-round. Keep the radio awake.
@@ -60,9 +62,11 @@ void TimerComms::update() {
                 Serial.printf("[COMMS] WiFi attempt timeout — retrying (%lus budget remaining)\n",
                               (CONNECT_BUDGET_MS - (now - _budgetStartMs)) / 1000);
                 _lastTcpAttemptMs = 0;
+                WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
-                delay(100);
+                delay(500);
                 WiFi.mode(WIFI_STA);
+                WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
                 WiFi.setSleep(false);
                 WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
                 _connectStartMs = now;

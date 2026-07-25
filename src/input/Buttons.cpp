@@ -23,7 +23,10 @@ void Buttons::begin() {
                        XPOWERS_AXP2101_PKEY_POSITIVE_IRQ);
         _pmu.clearIrqStatus();
 
-        // Enable power rails for audio subsystem
+        // Force-cycle all LDOs to clear any stuck register state that survives soft resets
+        _pmu.disableALDO2(); _pmu.disableALDO3(); _pmu.disableALDO4();
+        _pmu.disableBLDO1(); _pmu.disableBLDO2();
+        delay(50);
         _pmu.setALDO2Voltage(3300); _pmu.enableALDO2();
         _pmu.setALDO3Voltage(3300); _pmu.enableALDO3();
         _pmu.setALDO4Voltage(3300); _pmu.enableALDO4();

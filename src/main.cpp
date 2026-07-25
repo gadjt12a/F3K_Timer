@@ -43,6 +43,7 @@ static int  g_altFlightNo = 0;  // 1-based index of flight being entered; 0 = no
 static bool g_isF5K = false;
 static unsigned long g_taskSelectLastMs = 0;
 static unsigned long g_histLastMs       = 0;   // tracks inactivity in STATE_HISTORY
+static bool          g_histFromSettings = false;  // true = history entered via settings chain
 static unsigned long g_otaLastMs        = 0;   // tracks inactivity in STATE_OTA_CHECK
 
 // Pilot selection (only used when connected to base station)
@@ -459,17 +460,14 @@ void loop() {
             }
             if (changed) g_taskSelectLastMs = millis();
 
-            // R hold or 3s timeout: advance to OTA check screen (page 3 of settings)
+            // R hold or 3s timeout: advance to round history (page 3); OTA is last (page 4)
             bool confirm = btnR_held ||
                            (millis() - g_taskSelectLastMs >= TASK_SELECT_TIMEOUT_MS);
             if (confirm) {
-#ifdef WAVESHARE_HW
-                g_otaLastMs = millis();
-                g_ota.check();
-                g_state = STATE_OTA_CHECK;
-#else
-                g_state = STATE_IDLE;
-#endif
+                g_histSlot        = 0;
+                g_histLastMs      = millis();
+                g_histFromSettings = true;
+                g_state = STATE_HISTORY;
             }
             break;
         }
@@ -497,14 +495,26 @@ void loop() {
         }
 
         case STATE_HISTORY: {
+            auto _exitHistory = [&]() {
+#ifdef WAVESHARE_HW
+                if (g_histFromSettings) {
+                    g_histFromSettings = false;
+                    g_otaLastMs = millis();
+                    g_ota.check();
+                    g_state = STATE_OTA_CHECK;
+                    return;
+                }
+#endif
+                g_histFromSettings = false;
+                g_state = STATE_IDLE;
+            };
             bool acted = false;
             if (btnR_held) {
-                g_state = STATE_IDLE;
+                _exitHistory();
                 break;
             } else if (btnR) {
                 if (g_histSlot == 0) {
-                    // R at newest slot: exit to IDLE
-                    g_state = STATE_IDLE;
+                    _exitHistory();
                     break;
                 }
                 g_histSlot--;
@@ -515,7 +525,7 @@ void loop() {
             }
             if (acted) g_histLastMs = millis();
             // 8s inactivity timeout
-            if (millis() - g_histLastMs >= HIST_TIMEOUT_MS) g_state = STATE_IDLE;
+            if (millis() - g_histLastMs >= HIST_TIMEOUT_MS) _exitHistory();
             break;
         }
     }
