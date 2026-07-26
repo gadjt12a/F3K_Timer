@@ -55,7 +55,7 @@ static char g_selectedPilotName[MAX_PILOT_NAME + 1] = "";
 static unsigned long g_prepEndMs   = 0;  // millis() deadline for prep = 0
 static unsigned long g_prepZeroMs  = 0;  // when prep first hit 0 (for no-START fallback)
 static int  g_prepTotalS  = 0;           // arc denominator (original prep duration)
-static int  g_prepDispS   = 0;           // currently displayed prep second
+static int  g_prepDispDs  = 0;           // currently displayed prep time, tenths of a second
 static int  g_prepBeepS   = 0;           // last prep second beeped (avoid repeats)
 static unsigned long g_landEndMs   = 0;
 static int  g_landTotalS  = 0;
@@ -82,7 +82,7 @@ static int           _lastAltFlightNo = -1;
 static bool          _lastIsF5K       = false;
 static int           _lastTimerId     = -2;  // -2 = "never rendered"
 static int           _lastHistSlot    = -1;
-static int           _lastPrepDispS   = -1;
+static int           _lastPrepDispDs  = -1;
 static int           _lastLandDispS   = -1;
 #ifdef WAVESHARE_HW
 static OtaStatus     _lastOtaStatus   = OTA_IDLE;
@@ -109,7 +109,7 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
         if (wtSecs <= ARC_RED_THRESHOLD && wtSecs > 0) return millis() >= _nextFlashMs;
     }
     if (state == STATE_COUNTDOWN)      return g_countdownN != _lastCountdownN;
-    if (state == STATE_PREP)           return g_prepDispS  != _lastPrepDispS;
+    if (state == STATE_PREP)           return g_prepDispDs != _lastPrepDispDs;
     if (state == STATE_LANDING)        return g_landDispS  != _lastLandDispS;
     if (state == STATE_ALTITUDE_ENTRY) return g_altitudeM != _lastAltitudeM || g_altFlightNo != _lastAltFlightNo;
     return false;
@@ -137,12 +137,14 @@ static void _doRender(AppState state, int wtSecs) {
     int battPct    = g_btns.getBatteryPercent();
     bool charging  = g_btns.isCharging();
     const char* pilot = (g_selectedPilotName[0] != '\0') ? g_selectedPilotName : nullptr;
-    int auxRemainS = (state == STATE_LANDING) ? g_landDispS  : g_prepDispS;
-    int auxTotalS  = (state == STATE_LANDING) ? g_landTotalS : g_prepTotalS;
+    // Aux countdowns are passed in tenths so the prep clock can show them; landing
+    // still only tracks whole seconds, so scale it up to the same units.
+    int auxRemainDs = (state == STATE_LANDING) ? g_landDispS * 10 : g_prepDispDs;
+    int auxTotalDs  = ((state == STATE_LANDING) ? g_landTotalS : g_prepTotalS) * 10;
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
                 battPct, charging, pilot, g_comms.baseConnState(), g_countdownN,
                 g_altitudeM, g_altFlightNo, g_log.count(), g_isF5K,
-                g_comms.getTimerId(), auxRemainS, auxTotalS, g_jumpedStart);
+                g_comms.getTimerId(), auxRemainDs, auxTotalDs, g_jumpedStart);
     _lastState      = state;
     _lastWtSecs     = wtSecs;
     _lastWtMinutes  = g_wtMinutes;
@@ -153,7 +155,7 @@ static void _doRender(AppState state, int wtSecs) {
     _lastAltFlightNo = g_altFlightNo;
     _lastIsF5K       = g_isF5K;
     _lastTimerId     = g_comms.getTimerId();
-    _lastPrepDispS   = g_prepDispS;
+    _lastPrepDispDs  = g_prepDispDs;
     _lastLandDispS   = g_landDispS;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
@@ -325,13 +327,16 @@ void loop() {
             g_state = STATE_WORKING_TIME_EXPIRED;
         } else if (g_state == STATE_PREP || g_state == STATE_COUNTDOWN ||
                    g_state == STATE_LANDING) {
-            // CD aborted the round
+            // CD aborted the round. Anything already flown still has to be shown
+            // to the caller and — on F5K — have its altitudes entered, so only
+            // drop straight to IDLE when nothing was recorded. Aborting from the
+            // landing window used to bin the whole round silently.
             g_ft.stop();
             g_wt.reset();
             g_tones.silence();
             g_earlyFlight = false;
             g_jumpedStart = false;
-            g_state = STATE_IDLE;
+            g_state = (g_log.count() > 0) ? STATE_WORKING_TIME_EXPIRED : STATE_IDLE;
         }
     }
 
@@ -397,22 +402,33 @@ void loop() {
         case STATE_PREP: {
             unsigned long nowP = millis();
             long remMs = (long)(g_prepEndMs - nowP);
-            int  rem   = (remMs > 0) ? (int)((remMs + 999) / 1000) : 0;
-            g_prepDispS = rem;
+            int  remDs = (remMs > 0) ? (int)((remMs + 99) / 100) : 0;   // tenths, rounded up
+            int  rem   = (remDs + 9) / 10;                              // whole seconds
+            g_prepDispDs = remDs;
             // Beeps at 30, 15, 10..1; the long beep comes with START (window open)
             if (rem != g_prepBeepS && rem > 0 &&
                 (rem == 30 || rem == 15 || rem <= 10)) {
                 g_tones.playAlert(rem);
                 g_prepBeepS = rem;
             }
-            // R unlocks in the final 2s. Launching before the WT long beep is a
-            // jumped start — the flight runs but will be invalidated when stopped.
-            if (btnR && !g_earlyFlight && rem > 0 && rem <= PREP_UNLOCK_S) {
+            // R unlocks for the final PREP_UNLOCK_S seconds. Launching before the
+            // WT long beep is a jumped start — the flight runs but is invalidated
+            // when stopped.
+            //
+            // rem == 0 must stay unlocked: the local clock hits zero up to a second
+            // before START lands (base sends COUNT 1, sleeps 1s, then TASK+START),
+            // and that dead zone is exactly when a pilot jumps. Requiring rem > 0
+            // silently ate the press — btnBClicked() is one-shot — so the round then
+            // opened on WAIT with no flight running.
+            if (btnR && !g_earlyFlight && rem <= PREP_UNLOCK_S) {
                 g_ft.reset();
                 g_ft.start();
                 g_earlyFlight = true;
                 g_jumpedStart = true;
-                Serial.println("[MAIN] Flight started during prep — JUMPED START");
+                Serial.printf("[MAIN] Flight started during prep (rem=%ds) — JUMPED START\n", rem);
+            } else if (btnR) {
+                Serial.printf("[MAIN] R ignored during prep — %ds remaining (unlocks at %ds)\n",
+                              rem, (int)PREP_UNLOCK_S);
             }
             // Fallback: prep hit 0 but no START from base (packet loss) — start locally
             if (rem == 0) {

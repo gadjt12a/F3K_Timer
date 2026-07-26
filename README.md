@@ -23,9 +23,9 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 - **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS/COUNT commands, reports FLIGHT/ALTITUDE/SELECT back; queues messages when disconnected and flushes on reconnect
 - **Pilot selection UI** — scrollable list driven by PILOTS command from base station; SELECT sent on confirm
 - **10-second countdown arc** — green sweep during pre-round countdown from base
-- **Base-driven prep countdown** — `PREP t=` starts a yellow arc over the full prep time with beeps at 30/15/10–1s and huge digits for the final 10s; COUNT re-syncs the clock; if START is lost, the round starts locally 3s after prep hits 0
-- **Start lockout when connected** — idle start buttons disabled (base station owns round starts); flight start unlocks in the final 2s of prep
-- **Jumped-start invalidation** — launching before the WT long beep runs the flight flagged JUMPED (red); on stop it is auto-scratched, kept out of history, and reported to the CD via `JUMPED` instead of `FLIGHT`
+- **Base-driven prep countdown** — `PREP t=` starts a yellow arc over the full prep time with beeps at 30/15/10–1s; above 10s shows `M:SS.T` with tenths, final 10s shows huge `N.T`; COUNT re-syncs the clock; if START is lost, the round starts locally 250 ms after prep hits 0
+- **Start lockout when connected** — idle start buttons disabled (base station owns round starts); flight start unlocks in the final 2s of prep (including the dead zone between local prep clock hitting 0 and `START` arriving)
+- **Jumped-start invalidation** — launching before the WT long beep runs the flight flagged JUMPED (red); on stop it is auto-scratched, kept out of history, and reported to the CD via `JUMPED` instead of `FLIGHT`; abort during prep/countdown/landing returns to the results screen if flights were already recorded (preserves F5K altitude entry)
 - **Landing window countdown** — `LAND t=` after working time shows an orange arc with big seconds, then the results screen
 - **Timer ID display** — after ASSIGN, shows `T1` / `T2` etc. bold green on idle screen between battery indicator and GLIDE title
 - **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live; BASE OK replaced by pilot name once a pilot is selected
@@ -197,6 +197,9 @@ src/
 firmware/
   releases/         last 5 compiled builds (fw-vN/firmware.bin + .bin files)
   ota/              current OTA files served by base station HTTP server
+tools/
+  serial_log.py     background serial logger — writes rolling 500-line log to serial_log.txt
+                    run detached via /serial-monitor skill; Claude reads serial_log.txt live
 ```
 
 ## License

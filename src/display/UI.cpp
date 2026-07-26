@@ -468,8 +468,8 @@ void UI::render(AppState       state,
                 int                altTotalFlights,
                 bool               isF5K,
                 int                timerId,
-                int                auxRemainS,
-                int                auxTotalS,
+                int                auxRemainDs,
+                int                auxTotalDs,
                 bool               jumpedStart)
 {
     _jumped = jumpedStart;  // running screen shows JUMPED instead of FLYING
@@ -598,14 +598,23 @@ void UI::render(AppState       state,
         }
 
         case STATE_PREP:
-            // Full redraw once per second (gated by _needsRender in main.cpp)
-            if (!screenChanged) _clearScreen();
-            _drawPrep(auxRemainS, auxTotalS, pilotName);
+            // Called ten times a second (gated on tenths by _needsRender). Only fall
+            // back to the expensive full redraw when the layout actually changes:
+            // entering the screen, crossing the 10 s boundary, or the base re-syncing
+            // the clock backwards — otherwise repaint just the number and arc slice.
+            if (screenChanged || _prevPrepDs < 0 || auxRemainDs > _prevPrepDs ||
+                (auxRemainDs > 100) != (_prevPrepDs > 100)) {
+                if (!screenChanged) _clearScreen();
+                _drawPrep(auxRemainDs, auxTotalDs, pilotName);
+            } else {
+                _drawPrepInc(auxRemainDs, _prevPrepDs, auxTotalDs);
+            }
+            _prevPrepDs = auxRemainDs;
             break;
 
         case STATE_LANDING:
             if (!screenChanged) _clearScreen();
-            _drawLanding(auxRemainS, auxTotalS);
+            _drawLanding(auxRemainDs, auxTotalDs);
             break;
     }
 
@@ -883,12 +892,25 @@ void UI::_drawExpired(const FlightLog& log) {
 
 // ── Prep countdown (base-driven, yellow arc) ─────────────────────────────────
 
-void UI::_drawPrep(int remainS, int totalS, const char* pilotName) {
-    // Yellow arc — same geometry/behaviour as the WT arc, prep colour
-    _drawArc(remainS, totalS, COL_YELLOW);
-    char buf[8];
-    if (remainS > 10) {
-        snprintf(buf, sizeof(buf), "%d:%02d", remainS / 60, remainS % 60);
+// Single monospace string: "M:SS.T" above 10 s, "N.T" in the final 10 s.
+// Using FreeMonoBold throughout means every character cell is the same width,
+// so drawing a new string at the same position cleanly overwrites the old one
+// (setTextColor fills each cell background) with no ghost pixels.
+static void _fmtPrep(int remainDs, char* buf, size_t len) {
+    if (remainDs < 0) remainDs = 0;
+    if (remainDs > 100) {
+        int s = remainDs / 10;
+        snprintf(buf, len, "%d:%02d.%d", s / 60, s % 60, remainDs % 10);
+    } else {
+        snprintf(buf, len, "%d.%d", remainDs / 10, remainDs % 10);
+    }
+}
+
+void UI::_drawPrep(int remainDs, int totalDs, const char* pilotName) {
+    _drawArc(remainDs, totalDs, COL_YELLOW);
+    char buf[12];
+    _fmtPrep(remainDs, buf, sizeof(buf));
+    if (remainDs > 100) {
 #ifdef WOKWI_SIM
         _drawCentered("PREP TIME", DISPLAY_CX, DISPLAY_CY - 50, COL_YELLOW, 2);
         _drawCentered(buf,         DISPLAY_CX, DISPLAY_CY,      COL_WHITE,  4);
@@ -896,27 +918,48 @@ void UI::_drawPrep(int remainS, int totalS, const char* pilotName) {
             _drawCentered(pilotName, DISPLAY_CX, DISPLAY_CY + 50, COL_GRAY, 1);
 #else
         _drawFontCentered("PREP TIME", WS_CX, 130, COL_YELLOW, &FreeSansBold18pt7b);
-        _drawFontCentered(buf, WS_CX, WS_CY + 10, COL_WHITE, &FreeMonoBold24pt7b, 2);
+        _drawFontCentered(buf, WS_CX, WS_CY + 10, COL_WHITE, &FreeMonoBold24pt7b, 1);
         if (pilotName && pilotName[0])
             _drawFontCentered(pilotName, WS_CX, 360, COL_GRAY, &FreeSans12pt7b);
 #endif
     } else {
-        // Final 10 s — huge digits inside the arc; this is the competition start
-        snprintf(buf, sizeof(buf), "%d", remainS);
+        // Final 10 s — big centered time, no labels: pilot is focused on the clock
 #ifdef WOKWI_SIM
-        _drawCentered(buf, DISPLAY_CX, DISPLAY_CY, COL_WHITE, 10);
+        _drawCentered(buf, DISPLAY_CX, DISPLAY_CY, COL_WHITE, 6);
 #else
-        _drawFontCentered(buf, WS_CX, WS_CY, COL_WHITE, &FreeSansBold24pt7b, 4);
+        _drawFontCentered(buf, WS_CX, WS_CY, COL_WHITE, &FreeMonoBold24pt7b, 2);
 #endif
     }
 }
 
+void UI::_drawPrepInc(int remainDs, int prevDs, int totalDs) {
+#ifndef WOKWI_SIM
+    // Erase consumed arc slice
+    if (totalDs > 0 && prevDs > remainDs) {
+        _eraseArcSlice((float)remainDs / totalDs * 360.0f,
+                       (float)prevDs   / totalDs * 360.0f);
+    }
+    char buf[12];
+    _fmtPrep(remainDs, buf, sizeof(buf));
+    if (remainDs > 100) {
+        // "M:SS.T" is always 6 monospace chars. setTextColor(fg, bg) fills each
+        // character cell so re-drawing at the same position overwrites cleanly.
+        _drawFontCentered(buf, WS_CX, WS_CY + 10, COL_WHITE, &FreeMonoBold24pt7b, 1);
+    } else {
+        // "N.T" can be 3 chars ("9.4") or 4 chars ("10.0"), so clear first to
+        // prevent ghost pixels when the string shortens at the 10→9 boundary.
+        _gfx->fillRect(WS_CX - 110, WS_CY - 52, 220, 84, COL_BG);
+        _drawFontCentered(buf, WS_CX, WS_CY, COL_WHITE, &FreeMonoBold24pt7b, 2);
+    }
+#endif
+}
+
 // ── Landing window countdown (base-driven, orange arc) ───────────────────────
 
-void UI::_drawLanding(int remainS, int totalS) {
-    _drawArc(remainS, totalS, COL_ORANGE);
+void UI::_drawLanding(int remainDs, int totalDs) {
+    _drawArc(remainDs, totalDs, COL_ORANGE);
     char buf[8];
-    snprintf(buf, sizeof(buf), "%d", remainS);
+    snprintf(buf, sizeof(buf), "%d", remainDs / 10);
 #ifdef WOKWI_SIM
     _drawCentered("LANDING", DISPLAY_CX, DISPLAY_CY - 60, COL_ORANGE, 2);
     _drawCentered(buf,       DISPLAY_CX, DISPLAY_CY + 10, COL_WHITE,  8);

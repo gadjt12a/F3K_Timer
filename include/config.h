@@ -79,7 +79,12 @@ enum AppState : uint8_t {
 
 // ── Prep countdown (base-station driven) ─────────────────────────────────────
 #define PREP_UNLOCK_S        2     // R button unlocks this many s before WT start
-#define PREP_START_GRACE_MS  3000  // prep hit 0 but no START from base — start locally
+// Prep hit 0 but no START from base — open the window locally. The local prep
+// clock is re-synced to the base every second by COUNT, so its zero is accurate
+// to one packet's latency; waiting seconds for a START that may never arrive
+// (dropped link) opened the window — and the WT tone — that far late.
+// Just long enough for START to win the race on a healthy link.
+#define PREP_START_GRACE_MS   250
 
 // ── Base station connection state (for UI indicator) ─────────────────────────
 enum BaseConnState : uint8_t {

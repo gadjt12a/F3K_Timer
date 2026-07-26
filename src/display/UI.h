@@ -36,8 +36,8 @@ public:
                 int                altTotalFlights = 0,
                 bool               isF5K           = false,
                 int                timerId         = -1,
-                int                auxRemainS      = 0,   // PREP/LANDING seconds remaining
-                int                auxTotalS       = 0,   // PREP/LANDING total (arc denominator)
+                int                auxRemainDs     = 0,   // PREP/LANDING tenths remaining
+                int                auxTotalDs      = 0,   // PREP/LANDING total (arc denominator), tenths
                 bool               jumpedStart     = false);
 
     void renderHistory(int slot, const HistRound& hist, int totalSlots);
@@ -61,6 +61,7 @@ private:
     bool     _jumped       = false;  // current flight was a jumped start (invalid)
     unsigned long _lastArcSweepMs = 0;  // For sub-second arc sweep animation
     int      _prevBatteryPct = -1;      // Track battery changes
+    int      _prevPrepDs   = -1;        // last drawn prep tenths (incremental redraw)
 
     void _drawRunningFull(bool flightActive,
                           const WorkingTime& wt,
@@ -95,8 +96,9 @@ private:
     void _drawCentered(const char* str, int cx, int cy, uint16_t color, uint8_t size);
     void _drawFontCentered(const char* str, int cx, int cy, uint16_t color, const GFXfont* font,
                            uint8_t size = 1);
-    void _drawPrep(int remainS, int totalS, const char* pilotName);
-    void _drawLanding(int remainS, int totalS);
+    void _drawPrep(int remainDs, int totalDs, const char* pilotName);
+    void _drawPrepInc(int remainDs, int prevDs, int totalDs);
+    void _drawLanding(int remainDs, int totalDs);
     void _updateArc(int remaining, int total);
     void _drawArc(int remaining, int total, uint16_t color);
     void _drawArcSegment(float startDeg, float endDeg, uint16_t color);
