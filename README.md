@@ -122,7 +122,7 @@ PREP  (base station PREP t=N — yellow arc prep countdown)
   R click      → early flight start (only in final 2s; flagged JUMPED — invalid)
   START        → WORKING_TIME_RUNNING or FLIGHT_RUNNING (early flight kept) + long tone
   STOP         → IDLE  (CD abort)
-  0 + 3s, no START → start round locally (packet-loss fallback)
+  0 + 250ms, no START → start round locally (packet-loss fallback)
 
 LANDING  (base station LAND t=N after WT end — orange arc)
   R click / 0  → WORKING_TIME_EXPIRED  (results)
