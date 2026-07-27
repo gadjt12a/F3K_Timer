@@ -87,8 +87,14 @@ void TimerComms::update() {
                         _state = COMMS_CONNECTED;
                         _lastPingMs = now;
                         _lastRxMs   = now;
-                        char buf[40];
-                        snprintf(buf, sizeof(buf), "JOIN mac=%s", WiFi.macAddress().c_str());
+                        // Report the running firmware so the CD can see, from the
+                        // base station, which timers still need an update — there
+                        // is otherwise no way to know without picking each one up.
+                        // Older bases ignore unknown JOIN params, so this is safe
+                        // to send unconditionally.
+                        char buf[64];
+                        snprintf(buf, sizeof(buf), "JOIN mac=%s fw=%s",
+                                 WiFi.macAddress().c_str(), FW_VERSION);
                         _sendLine(buf);
                     }
                 }
