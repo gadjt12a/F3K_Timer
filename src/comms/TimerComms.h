@@ -78,21 +78,40 @@ private:
     char _rxBuf[RX_BUF_SIZE];
     int  _rxLen = 0;
 
-    // Outbound message buffer — queues FLIGHT/ALTITUDE/SELECT when disconnected
-    static const int  PENDING_MAX  = 16;
-    static const int  PENDING_LINE = 64;
-    struct PendingMsg { char line[PENDING_LINE]; };
+    // Outbound message buffer for FLIGHT/JUMPED/ALTITUDE/SELECT.
+    //
+    // An entry stays here until the base ACKs it byte-for-byte. Sending is NOT
+    // proof of delivery: on a silently dead socket (AP glitch, no FIN/RST) lwIP
+    // accepts the write and discards it, and _tcp.connected() keeps returning
+    // true for up to ~60 s. The old code dequeued at send time, so a flight time
+    // written into that hole was simply gone.
+    //
+    // A plain array rather than the previous ring: ACKs let entries leave from
+    // the middle, which a head/tail ring cannot express.
+    static const int PENDING_MAX  = 16;
+    static const int PENDING_LINE = 64;
+    struct PendingMsg {
+        char          line[PENDING_LINE];
+        unsigned long lastSentMs;   // 0 = queued but never yet put on the wire
+        uint16_t      attempts;
+    };
     PendingMsg _pending[PENDING_MAX];
-    int        _pendingHead = 0;
-    int        _pendingTail = 0;
+    int        _pendingCount = 0;
+
+    // Retry cadence for un-ACKed messages while connected. A healthy round trip
+    // is well under 100 ms, so 5 s only fires when something is genuinely wrong,
+    // and the base dedups replayed FLIGHTs on (pilot, group, duration).
+    static const unsigned long ACK_RETRY_MS = 5000;
 
 #ifndef WOKWI_SIM
     void _readLines();
     void _parseLine(const char* line);
     void _parsePilots(const char* data);
     void _sendLine(const char* line);
-    void _sendOrQueue(const char* line);   // send if socket alive, else queue + force reconnect
+    void _sendOrQueue(const char* line);   // queue, then send if the socket looks alive
     void _enqueue(const char* line);
-    void _flushPending();
+    void _flushPending();                  // (re)send everything still awaiting an ACK
+    void _ackPending(const char* msg);     // drop the entry the base just confirmed
+    void _retryPending();                  // resend anything un-ACKed past ACK_RETRY_MS
 #endif
 };

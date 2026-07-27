@@ -131,6 +131,10 @@ void TimerComms::update() {
                 _tcp.flush();
                 _lastPingMs = now;
             }
+            // Anything the base has not confirmed gets another go. Placed after
+            // _readLines() so an ACK that arrived this pass is already applied
+            // and we do not resend a message that was just confirmed.
+            _retryPending();
             break;
 
         case COMMS_FAILED:
@@ -198,11 +202,19 @@ void TimerComms::sendSelect(int pilotId) {
 // catches the explicit-close case immediately; if it fails while we still think
 // we're connected, force the reconnect path now instead of waiting for RX timeout.
 void TimerComms::_sendOrQueue(const char* line) {
+    // Queue FIRST, always — even on what looks like a healthy socket. The entry
+    // is only released when the base ACKs it, so a write that vanishes into a
+    // silently dead socket is retried instead of lost.
+    _enqueue(line);
     if (_state == COMMS_CONNECTED && _tcp.connected()) {
         _sendLine(line);
+        if (_pendingCount > 0) {
+            PendingMsg& m = _pending[_pendingCount - 1];
+            m.lastSentMs = millis();
+            m.attempts   = 1;
+        }
         return;
     }
-    _enqueue(line);
     if (_state == COMMS_CONNECTED) {
         Serial.println("[COMMS] Socket dead on send — forcing reconnect");
         unsigned long now = millis();
@@ -282,6 +294,9 @@ void TimerComms::_parseLine(const char* line) {
         _hasLandStart = true;
         Serial.printf("[COMMS] Landing window: %ds\n", _landSeconds);
 
+    } else if (strncmp(line, "ACK ", 4) == 0) {
+        _ackPending(line + 4);
+
     } else if (strcmp(line, "PONG") == 0) {
         // keepalive — _lastRxMs already updated above
 
@@ -291,25 +306,62 @@ void TimerComms::_parseLine(const char* line) {
 }
 
 void TimerComms::_enqueue(const char* line) {
-    int next = (_pendingTail + 1) % PENDING_MAX;
-    if (next == _pendingHead) {
-        Serial.println("[COMMS] Pending buffer full — dropping message");
+    if (_pendingCount >= PENDING_MAX) {
+        // Drop the newest, not the oldest: the older entries have already been
+        // attempted and are closer to being confirmed. Either way this is data
+        // loss, so it is logged loudly rather than counted silently.
+        Serial.printf("[COMMS] Pending buffer FULL (%d) — DROPPING: %s\n", PENDING_MAX, line);
         return;
     }
-    strncpy(_pending[_pendingTail].line, line, PENDING_LINE - 1);
-    _pending[_pendingTail].line[PENDING_LINE - 1] = '\0';
-    _pendingTail = next;
-    Serial.printf("[COMMS] Queued (offline): %s\n", line);
+    PendingMsg& m = _pending[_pendingCount++];
+    strncpy(m.line, line, PENDING_LINE - 1);
+    m.line[PENDING_LINE - 1] = '\0';
+    m.lastSentMs = 0;
+    m.attempts   = 0;
+    Serial.printf("[COMMS] Pending (%d): %s\n", _pendingCount, line);
 }
 
+// (Re)send everything still awaiting an ACK, oldest first. Called on ASSIGN so a
+// reconnect replays the backlog, and by _retryPending() on a stalled entry.
 void TimerComms::_flushPending() {
-    int count = 0;
-    while (_pendingHead != _pendingTail) {
-        _sendLine(_pending[_pendingHead].line);
-        _pendingHead = (_pendingHead + 1) % PENDING_MAX;
-        count++;
+    if (_pendingCount == 0) return;
+    unsigned long now = millis();
+    for (int i = 0; i < _pendingCount; i++) {
+        _sendLine(_pending[i].line);
+        _pending[i].lastSentMs = now;
+        _pending[i].attempts++;
     }
-    if (count > 0) Serial.printf("[COMMS] Flushed %d queued messages\n", count);
+    Serial.printf("[COMMS] Sent %d pending message(s), awaiting ACK\n", _pendingCount);
+}
+
+// Base confirmed one message. Match byte-for-byte — the base echoes verbatim
+// precisely so this can be an exact comparison rather than a re-parse.
+void TimerComms::_ackPending(const char* msg) {
+    for (int i = 0; i < _pendingCount; i++) {
+        if (strcmp(_pending[i].line, msg) != 0) continue;
+        // Close the gap; order of the remainder is preserved.
+        for (int j = i; j < _pendingCount - 1; j++) _pending[j] = _pending[j + 1];
+        _pendingCount--;
+        Serial.printf("[COMMS] ACKed (%d still pending): %s\n", _pendingCount, msg);
+        return;
+    }
+    // Not an error: a retry can be ACKed twice, and the first ACK already
+    // removed the entry.
+    Serial.printf("[COMMS] ACK for unknown / already-cleared message: %s\n", msg);
+}
+
+void TimerComms::_retryPending() {
+    if (_pendingCount == 0 || _state != COMMS_CONNECTED || !_tcp.connected()) return;
+    unsigned long now = millis();
+    for (int i = 0; i < _pendingCount; i++) {
+        PendingMsg& m = _pending[i];
+        if (m.lastSentMs == 0 || (now - m.lastSentMs) < ACK_RETRY_MS) continue;
+        m.lastSentMs = now;
+        m.attempts++;
+        Serial.printf("[COMMS] No ACK after %lums, retry #%u: %s\n",
+                      ACK_RETRY_MS, m.attempts, m.line);
+        _sendLine(m.line);
+    }
 }
 
 // Parse "1:Alice Smi,2:Bob Jon,3:Charlie Bro"
