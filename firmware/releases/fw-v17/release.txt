@@ -1,6 +1,6 @@
-F3K Timer fw-v12
-Date: 2026-07-24
-Source commit: e1dc82b9f96f3c7bcbfebdab6b58cc3f3ae1e7c3
+F3K Timer fw-v17
+Date: 2026-07-28
+Source commit: 20acb9c89827d20b6ed4fe6ecacf757cd1a20355
 
 Flash addresses (esptool):
   0x00000  bootloader.bin
