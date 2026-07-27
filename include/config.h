@@ -57,7 +57,6 @@ enum OtaStatus : uint8_t {
 // ── OTA server (base station HTTP, same AP as timer comms) ────────────────────
 #define OTA_VERSION_URL  "http://" BASE_HOST ":8080/ota/version.json"
 #define OTA_FIRMWARE_URL "http://" BASE_HOST ":8080/ota/firmware.bin"
-#define OTA_TIMEOUT_MS   8000   // auto-exit OTA screen after 8s inactivity
 
 // ── Application states ────────────────────────────────────────────────────────
 enum AppState : uint8_t {

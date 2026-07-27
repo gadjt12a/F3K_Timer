@@ -44,7 +44,6 @@ static bool g_isF5K = false;
 static unsigned long g_taskSelectLastMs = 0;
 static unsigned long g_histLastMs       = 0;   // tracks inactivity in STATE_HISTORY
 static bool          g_histFromSettings = false;  // true = history entered via settings chain
-static unsigned long g_otaLastMs        = 0;   // tracks inactivity in STATE_OTA_CHECK
 
 // Pilot selection (only used when connected to base station)
 static int  g_selectedPilotIdx = 0;
@@ -618,6 +617,15 @@ void loop() {
         case STATE_OTA_CHECK: {
 #ifdef WAVESHARE_HW
             OtaStatus ota = g_ota.getStatus();
+            // No inactivity timeout here: R is the only way out.
+            //
+            // There used to be an 8s one, and OTA_CHECKING was not in the `busy`
+            // set below — so the screen bounced back to IDLE while the version
+            // request to the base station was still in flight, and the check
+            // never got to finish. A timeout is wrong for this screen anyway:
+            // fetching and flashing are slow by nature, and the user is standing
+            // there watching it. OTA_SUCCESS calls ESP.restart(), so `busy`
+            // cannot strand anyone.
             bool busy = (ota == OTA_DOWNLOADING || ota == OTA_SUCCESS);
             if (!busy) {
                 if (btnR_held && ota == OTA_AVAILABLE) {
@@ -625,11 +633,7 @@ void loop() {
                 } else if (btnR) {
                     g_state = STATE_IDLE;
                     break;
-                } else if (millis() - g_otaLastMs >= OTA_TIMEOUT_MS) {
-                    g_state = STATE_IDLE;
-                    break;
                 }
-                if (btnR || btnL) g_otaLastMs = millis();  // reset timeout on any press
             }
 #else
             g_state = STATE_IDLE;
@@ -642,7 +646,6 @@ void loop() {
 #ifdef WAVESHARE_HW
                 if (g_histFromSettings) {
                     g_histFromSettings = false;
-                    g_otaLastMs = millis();
                     g_ota.check();
                     g_state = STATE_OTA_CHECK;
                     return;

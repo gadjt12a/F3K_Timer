@@ -31,7 +31,7 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 - **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live; BASE OK replaced by pilot name once a pilot is selected
 - **NVS round history (ROUND RECALL)** — stores last 3 rounds (discipline, pilot name, flight times, F5K altitudes) to ESP32 NVS; each flight written immediately so data survives power loss mid-round; accessible via `STATE_HISTORY` from the expired screen (L) or settings chain; "N of 3" slot indicator, L=older / R=newer/exit, 8s inactivity timeout
 - **Pilot decouple** — timer clears pilot binding automatically when returning to idle after a completed round
-- **OTA firmware updates** — settings page 3 checks for updates from the base station HTTP server; R hold applies the update; device reboots automatically when done
+- **OTA firmware updates** — settings page 3 checks for updates from the base station HTTP server; R hold applies the update; device reboots automatically when done. **No inactivity timeout on this screen — R is the only way out.** It previously auto-exited after 8s, and `OTA_CHECKING` was not treated as busy, so the screen bounced back to IDLE while the version request was still in flight and the check never completed. A timeout is wrong here regardless: fetching and flashing are slow by nature and the user is watching.
 
 ## Hardware
 
@@ -105,7 +105,7 @@ TASK_SELECT  (page 2: task type)
 OTA_CHECK  (page 3: firmware update)
   on entry   → async version check to base station :8080
   R hold     → download + flash update (when available)
-  R click / 8s timeout → IDLE
+  R click    → IDLE   (no inactivity timeout — see note)
 
 PILOT_SELECT  (base station only)
   R click      → next pilot
