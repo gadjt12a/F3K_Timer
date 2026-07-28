@@ -23,6 +23,7 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 - **Base station WiFi connectivity** — connects to F3K_BASE AP, receives TASK/START/STOP/PILOTS/COUNT commands, reports FLIGHT/JUMPED/ALTITUDE/SELECT back
 - **ACK-gated outbound queue (fw-v16)** — every reported message is queued *before* sending, even on a socket that looks healthy, and released only when the base echoes it back as `ACK <line>`. Resent in full on `ASSIGN` (i.e. after any reconnect) and retried after 5s. Sending is not proof of delivery: on a silently dead socket lwIP accepts the write and discards it while `_tcp.connected()` still reports true for up to ~60s, and a flight time written into that hole used to be lost. Needs a base station that ACKs unconditionally — see `docs/PROTOCOL_ACK.md` in the base station repo
 - **Firmware version reporting (fw-v17)** — the JOIN handshake carries the running build (`JOIN mac=… fw=…`), so the base station's Settings page can show which timers are still on an old version without picking each one up. Older bases ignore the extra param
+- **Screen sleep (fw-v19, AMOLED burn-in)** — blanks to true black after 2 minutes of inactivity, so the pixels are genuinely off. Behaviour depends on whether a USB cable is attached: **in the field** the screen never blanks during a live round, so a caller can never look down mid-flight at a black display; **on the bench** (USB attached) it blanks regardless of state, since a simulated round can run for minutes with nobody watching. Any button wakes it, as does anything that moves the timer to a different screen. The base station can force it on for a bounded window with `SCREEN t=N`
 - **Pilot selection UI** — scrollable list driven by PILOTS command from base station; SELECT sent on confirm
 - **10-second countdown arc** — green sweep during pre-round countdown from base
 - **Base-driven prep countdown** — `PREP t=` starts a yellow arc over the full prep time with beeps at 30/15/10–1s; above 10s shows `M:SS.T` with tenths, final 10s shows huge `N.T`; COUNT re-syncs the clock; if START is lost, the round starts locally 250 ms after prep hits 0
@@ -129,6 +130,14 @@ PREP  (base station PREP t=N — yellow arc prep countdown)
 LANDING  (base station LAND t=N after WT end — orange arc)
   R click / 0  → WORKING_TIME_EXPIRED  (results)
   STOP         → IDLE  (CD abort)
+
+SCREEN SLEEP  (overlays every state; AMOLED burn-in)
+  no activity for SCREEN_SLEEP_MS → blank to black
+    field (no USB): every state EXCEPT a live round
+                    (PREP/COUNTDOWN/WT/FLIGHT/SCRATCH/LANDING)
+    bench (USB):    every state, including a live round
+  any button, or a change of screen → wake + full repaint
+  SCREEN t=N from base → forced on for N seconds (0 releases)
 ```
 
 ## Base Station
