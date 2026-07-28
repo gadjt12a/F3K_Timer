@@ -164,6 +164,7 @@ bool TimerComms::hasPilotList()     { bool v = _hasPilotList;     _hasPilotList 
 bool TimerComms::hasCountdown()     { bool v = _hasCountdown;     _hasCountdown     = false; return v; }
 bool TimerComms::hasPrepStart()     { bool v = _hasPrepStart;     _hasPrepStart     = false; return v; }
 bool TimerComms::hasLandStart()     { bool v = _hasLandStart;     _hasLandStart     = false; return v; }
+bool TimerComms::hasScreenCmd()     { bool v = _hasScreenCmd;     _hasScreenCmd     = false; return v; }
 
 void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
 #ifndef WOKWI_SIM
@@ -299,6 +300,13 @@ void TimerComms::_parseLine(const char* line) {
         _landSeconds  = atoi(line + 7);
         _hasLandStart = true;
         Serial.printf("[COMMS] Landing window: %ds\n", _landSeconds);
+
+    } else if (strncmp(line, "SCREEN t=", 9) == 0) {
+        // Force the display on for N seconds so display work can be checked
+        // remotely without someone standing over the timer. 0 = release.
+        _screenSeconds = atoi(line + 9);
+        _hasScreenCmd  = true;
+        Serial.printf("[COMMS] Screen force-on: %ds\n", _screenSeconds);
 
     } else if (strncmp(line, "ACK ", 4) == 0) {
         _ackPending(line + 4);

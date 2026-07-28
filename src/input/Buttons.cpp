@@ -10,6 +10,7 @@ void Buttons::begin() {
     if (!_pmu.begin(Wire, ADDR_AXP2101, IIC_SDA, IIC_SCL)) {
         Serial.println("[BTN] AXP2101 init FAILED");
     } else {
+        _pmuOk = true;
         // Prevent sleep mode from suppressing PKEY events.
         _pmu.disableSleep();
 
@@ -165,6 +166,17 @@ int Buttons::getBatteryPercent() {
 bool Buttons::isCharging() {
 #ifdef WAVESHARE_HW
     return _pmu.isCharging();
+#else
+    return false;
+#endif
+}
+
+bool Buttons::isUsbPowered() {
+#ifdef WAVESHARE_HW
+    // Guarded on _pmuOk: a failed AXP2101 init leaves the library returning
+    // junk, and reading "no USB" from a dead PMU would silently disable bench
+    // mode exactly when someone is sitting there debugging.
+    return _pmuOk && _pmu.isVbusIn();
 #else
     return false;
 #endif

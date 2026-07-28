@@ -25,12 +25,14 @@ public:
     bool hasCountdown();        // base sent COUNT N — read getCountdownN() before next call
     bool hasPrepStart();        // base sent PREP t=N — read getPrepSeconds() before next call
     bool hasLandStart();        // base sent LAND t=N — read getLandSeconds() before next call
+    bool hasScreenCmd();        // base sent SCREEN t=N — read getScreenSeconds() before next call
 
     int  getTaskWtSeconds() const { return _taskWtSeconds; }
     int  getTimerId()       const { return _timerId; }
     int  getCountdownN()    const { return _countdownN; }
     int  getPrepSeconds()   const { return _prepSeconds; }
     int  getLandSeconds()   const { return _landSeconds; }
+    int  getScreenSeconds() const { return _screenSeconds; }
     bool isF5K()            const { return _isF5K; }
 
     int          getPilotCount()    const { return _pilotCount; }
@@ -56,9 +58,11 @@ private:
     bool _hasCountdown    = false;
     bool _hasPrepStart    = false;
     bool _hasLandStart    = false;
+    bool _hasScreenCmd    = false;
     int  _countdownN      = 0;
     int  _prepSeconds     = 0;
     int  _landSeconds     = 0;
+    int  _screenSeconds   = 0;
 
     unsigned long _budgetStartMs       = 0;  // start of current 5-min connect window
     unsigned long _connectStartMs      = 0;  // start of current WiFi attempt (60s each)

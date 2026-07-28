@@ -45,20 +45,21 @@ static unsigned long g_taskSelectLastMs = 0;
 static unsigned long g_histLastMs       = 0;   // tracks inactivity in STATE_HISTORY
 static bool          g_histFromSettings = false;  // true = history entered via settings chain
 
-// Pilot selection (only used when connected to base station)
-// ── Idle screen sleep (AMOLED burn-in) ───────────────────────────────────────
-// The idle screen is almost entirely static — GLIDE title, battery bar, timer
-// ID — and this is an AMOLED, so a timer left powered on the bench (or cabled to
-// the base station for remote development) will ghost those elements
-// permanently. Blank after a period of inactivity while IDLE; any button, or any
-// instruction from the base, brings it straight back.
+// ── Screen sleep (AMOLED burn-in) ────────────────────────────────────────────
+// These screens are almost entirely static — GLIDE title, battery bar, timer ID,
+// the results table — and this is an AMOLED, so a timer left powered will ghost
+// them permanently. Blank after SCREEN_SLEEP_MS of inactivity; any button, or
+// anything that moves the timer on to a different screen, brings it back.
 //
-// IDLE only, deliberately: nothing sleeps while a round is live, so this can
-// never blank the screen a caller is reading mid-flight.
-static unsigned long g_lastActivityMs = 0;
-static bool          g_screenAsleep   = false;
+// Which screens may blank depends on where the timer is: see _screenMaySleep().
+// The base station can also force the screen on for a fixed window (SCREEN t=N)
+// so display work can be checked without standing over the device.
+static unsigned long g_lastActivityMs     = 0;
+static bool          g_screenAsleep       = false;
+static unsigned long g_screenForceUntilMs = 0;  // base station override deadline
 static void _wakeScreen();            // defined below _lastState, which it resets
 
+// Pilot selection (only used when connected to base station)
 static int  g_selectedPilotIdx = 0;
 static int  g_selectedPilotId  = 0;
 static char g_selectedPilotName[MAX_PILOT_NAME + 1] = "";
@@ -109,13 +110,8 @@ static void _wakeScreen() {
     }
 }
 
-// Which screens may blank after inactivity. Expressed as "never during a live
-// round" rather than "only when idle": the first version blanked only
-// STATE_IDLE, and testing showed the timer parks on the *results* screen after
-// a round and stays there, fully lit, until someone presses R. The settings and
-// OTA screens have the same problem — and the OTA screen deliberately has no
-// timeout at all now, so it would otherwise sit lit indefinitely.
-static bool _screenMaySleep(AppState s) {
+// True while a round is actually being flown, i.e. someone is watching the clock.
+static bool _roundLive(AppState s) {
     switch (s) {
         case STATE_PREP:
         case STATE_COUNTDOWN:
@@ -123,10 +119,36 @@ static bool _screenMaySleep(AppState s) {
         case STATE_FLIGHT_RUNNING:
         case STATE_SCRATCH_CONFIRM:
         case STATE_LANDING:
-            return false;    // a caller is watching the clock — never blank
-        default:
             return true;
+        default:
+            return false;
     }
+}
+
+// Bench mode: a USB cable is attached, so this timer is on a desk or wired to
+// the base station for development — not in a caller's hand at a competition.
+// The distinction matters because the two want opposite things: in the field the
+// screen must never blank mid-round, while on the bench a simulated round can run
+// for ten minutes with nobody looking, which is exactly what burns an AMOLED.
+static bool _benchMode() {
+    // VBUS is the real signal, but it is read through the AXP2101, which does
+    // not always survive a reset-during-boot. The USB CDC host connection is an
+    // independent fallback and is true precisely when a serial monitor is
+    // attached — the case we most want covered.
+    return g_btns.isUsbPowered() || (bool)Serial;
+}
+
+// Whether this screen may blank after the inactivity period.
+//
+// The first version blanked STATE_IDLE only. Testing a full round from the base
+// station showed the timer parks on the *results* screen afterwards and sits
+// there fully lit until someone presses R — so the burn-in it was written to
+// prevent was still happening, just on a different screen. Settings, pilot
+// select, history and the (now timeout-free) OTA screen had the same hole.
+static bool _screenMaySleep(AppState s) {
+    if (!_roundLive(s)) return true;
+    // On the bench, even a live round may blank: nobody is holding it.
+    return _benchMode();
 }
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
@@ -720,9 +742,19 @@ void loop() {
     // ── Screen sleep (AMOLED burn-in) ────────────────────────────────────────
     // Any press is activity, whether or not the current state acted on it.
     if (btnR || btnL || btnR_held || btnR_veryLong) _wakeScreen();
-    // A live round keeps the screen up unconditionally — the caller must never
-    // look down mid-flight at a black display and have to press something.
+    // In the field a live round keeps the screen up unconditionally — the caller
+    // must never look down mid-flight at a black display and have to press
+    // something. On the bench that protection is dropped (see _screenMaySleep).
     if (!_screenMaySleep(g_state)) _wakeScreen();
+    // Base station asked for the screen, so display work can be checked remotely
+    // without someone standing over the timer.
+    if (g_comms.hasScreenCmd()) {
+        int secs = g_comms.getScreenSeconds();
+        g_screenForceUntilMs = secs > 0 ? millis() + (unsigned long)secs * 1000UL : 0;
+        _wakeScreen();
+        Serial.printf("[MAIN] Screen forced on for %ds (0 = released)\n", secs);
+    }
+    if (g_screenForceUntilMs && (long)(millis() - g_screenForceUntilMs) < 0) _wakeScreen();
 #ifdef WAVESHARE_HW
     // An OTA check or download is progress the user is watching, with no button
     // presses to keep it alive. Treat it as activity in its own right.

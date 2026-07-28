@@ -21,12 +21,16 @@ public:
     // Battery info (hardware only — returns defaults on Wokwi)
     int  getBatteryPercent();  // 0-100
     bool isCharging();
+    // VBUS present, i.e. a USB cable is plugged in. Used to tell "on a desk or
+    // wired to the base station" from "in a caller's hand at a competition".
+    bool isUsbPowered();
 
 private:
 #ifdef WAVESHARE_HW
     XPowersAXP2101 _pmu;
 #endif
 
+    bool _pmuOk = false;   // AXP2101 came up; without it VBUS is unreadable
     bool _prevA = false, _prevB = false;
     unsigned long _pressedAms = 0, _pressedBms = 0;
     unsigned long _lastBChangeMs = 0;  // debounce tracking
