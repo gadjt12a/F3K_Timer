@@ -39,6 +39,12 @@ static const int ALERT_COUNT   = 14;
 #define HIST_SLOTS               3     // NVS round history slots (newest → oldest)
 #define HIST_TIMEOUT_MS          8000  // auto-exit history screen after 8s inactivity
 
+// Blank the AMOLED after this long on the idle screen. Burn-in protection: the
+// idle screen is nearly all static, and a timer left powered — on the bench, or
+// cabled to the base station for remote development — will ghost it permanently.
+// Only ever applies in STATE_IDLE, so it cannot blank a live round.
+#define SCREEN_SLEEP_MS        120000  // 2 minutes
+
 // ── Flight log ────────────────────────────────────────────────────────────────
 #define MAX_FLIGHTS             10
 

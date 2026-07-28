@@ -46,6 +46,19 @@ static unsigned long g_histLastMs       = 0;   // tracks inactivity in STATE_HIS
 static bool          g_histFromSettings = false;  // true = history entered via settings chain
 
 // Pilot selection (only used when connected to base station)
+// ── Idle screen sleep (AMOLED burn-in) ───────────────────────────────────────
+// The idle screen is almost entirely static — GLIDE title, battery bar, timer
+// ID — and this is an AMOLED, so a timer left powered on the bench (or cabled to
+// the base station for remote development) will ghost those elements
+// permanently. Blank after a period of inactivity while IDLE; any button, or any
+// instruction from the base, brings it straight back.
+//
+// IDLE only, deliberately: nothing sleeps while a round is live, so this can
+// never blank the screen a caller is reading mid-flight.
+static unsigned long g_lastActivityMs = 0;
+static bool          g_screenAsleep   = false;
+static void _wakeScreen();            // defined below _lastState, which it resets
+
 static int  g_selectedPilotIdx = 0;
 static int  g_selectedPilotId  = 0;
 static char g_selectedPilotName[MAX_PILOT_NAME + 1] = "";
@@ -87,6 +100,14 @@ static int           _lastLandDispS   = -1;
 static OtaStatus     _lastOtaStatus   = OTA_IDLE;
 static int           _lastOtaProg10   = -1;  // progress in 10% increments
 #endif
+
+static void _wakeScreen() {
+    g_lastActivityMs = millis();
+    if (g_screenAsleep) {
+        g_screenAsleep = false;
+        _lastState = (AppState)255;   // force a full repaint, not a diffed update
+    }
+}
 
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
@@ -676,8 +697,26 @@ void loop() {
         }
     }
 
+    // ── Idle screen sleep ────────────────────────────────────────────────────
+    // Any press is activity, whether or not the current state acted on it.
+    if (btnR || btnL || btnR_held || btnR_veryLong) _wakeScreen();
+    // So is anything that moves us off the idle screen — a heat being loaded,
+    // a round starting, the CD pushing a pilot list. The screen must already be
+    // awake when the caller looks down, not wake up when they touch it.
+    if (g_state != STATE_IDLE) _wakeScreen();
+
     int curWtSecs = g_wt.getRemaining();
-    if (_needsRender(g_state, curWtSecs, g_comms.baseConnState())) _doRender(g_state, curWtSecs);
+    if (g_state == STATE_IDLE && !g_screenAsleep &&
+            millis() - g_lastActivityMs >= SCREEN_SLEEP_MS) {
+        g_screenAsleep = true;
+        g_ui.blank();
+        Serial.println("[MAIN] Screen asleep (idle) — press any button to wake");
+    }
+    if (g_screenAsleep) {
+        // Skip rendering entirely; the panel stays black until something wakes it
+    } else if (_needsRender(g_state, curWtSecs, g_comms.baseConnState())) {
+        _doRender(g_state, curWtSecs);
+    }
 
     unsigned long now = millis();
     if (now - g_lastDbgMs >= 2000) {

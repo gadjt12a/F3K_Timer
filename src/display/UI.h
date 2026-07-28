@@ -43,6 +43,13 @@ public:
     void renderHistory(int slot, const HistRound& hist, int totalSlots);
     void renderOtaCheck(OtaStatus status, int progress, const char* availVer);
 
+    // Blank the panel to true black. This is an AMOLED: black pixels are off,
+    // so an all-black screen both stops burn-in and draws almost no current.
+    // Used by the idle screen-saver — the idle screen is almost entirely static
+    // (GLIDE title, battery, timer ID), which is exactly what burns in when a
+    // timer sits powered for hours on the bench.
+    void blank();
+
 private:
 #ifdef WOKWI_SIM
     Adafruit_ILI9341 _tft{TFT_CS, TFT_DC, TFT_RST};

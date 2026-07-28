@@ -1276,6 +1276,13 @@ void UI::renderOtaCheck(OtaStatus status, int progress, const char* availVer) {
 #endif
 }
 
+void UI::blank() {
+    _clearScreen();
+#ifndef WOKWI_SIM
+    _gfx->flush();
+#endif
+}
+
 void UI::_drawOtaCheck(OtaStatus status, int progress, const char* availVer) {
 #ifndef WOKWI_SIM
     ws_fillRing(_gfx, WS_CX, WS_CY, 225, 218, COL_DIMGRAY);
