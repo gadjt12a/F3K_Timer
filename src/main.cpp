@@ -109,6 +109,26 @@ static void _wakeScreen() {
     }
 }
 
+// Which screens may blank after inactivity. Expressed as "never during a live
+// round" rather than "only when idle": the first version blanked only
+// STATE_IDLE, and testing showed the timer parks on the *results* screen after
+// a round and stays there, fully lit, until someone presses R. The settings and
+// OTA screens have the same problem — and the OTA screen deliberately has no
+// timeout at all now, so it would otherwise sit lit indefinitely.
+static bool _screenMaySleep(AppState s) {
+    switch (s) {
+        case STATE_PREP:
+        case STATE_COUNTDOWN:
+        case STATE_WORKING_TIME_RUNNING:
+        case STATE_FLIGHT_RUNNING:
+        case STATE_SCRATCH_CONFIRM:
+        case STATE_LANDING:
+            return false;    // a caller is watching the clock — never blank
+        default:
+            return true;
+    }
+}
+
 static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state != _lastState) return true;
     if (state == STATE_IDLE)
@@ -697,20 +717,28 @@ void loop() {
         }
     }
 
-    // ── Idle screen sleep ────────────────────────────────────────────────────
+    // ── Screen sleep (AMOLED burn-in) ────────────────────────────────────────
     // Any press is activity, whether or not the current state acted on it.
     if (btnR || btnL || btnR_held || btnR_veryLong) _wakeScreen();
-    // So is anything that moves us off the idle screen — a heat being loaded,
-    // a round starting, the CD pushing a pilot list. The screen must already be
-    // awake when the caller looks down, not wake up when they touch it.
-    if (g_state != STATE_IDLE) _wakeScreen();
+    // A live round keeps the screen up unconditionally — the caller must never
+    // look down mid-flight at a black display and have to press something.
+    if (!_screenMaySleep(g_state)) _wakeScreen();
+#ifdef WAVESHARE_HW
+    // An OTA check or download is progress the user is watching, with no button
+    // presses to keep it alive. Treat it as activity in its own right.
+    if (g_state == STATE_OTA_CHECK &&
+        (g_ota.getStatus() == OTA_CHECKING || g_ota.getStatus() == OTA_DOWNLOADING)) {
+        _wakeScreen();
+    }
+#endif
 
     int curWtSecs = g_wt.getRemaining();
-    if (g_state == STATE_IDLE && !g_screenAsleep &&
+    if (!g_screenAsleep && _screenMaySleep(g_state) &&
             millis() - g_lastActivityMs >= SCREEN_SLEEP_MS) {
         g_screenAsleep = true;
         g_ui.blank();
-        Serial.println("[MAIN] Screen asleep (idle) — press any button to wake");
+        Serial.printf("[MAIN] Screen asleep (state=%d) — press any button to wake\n",
+                      (int)g_state);
     }
     if (g_screenAsleep) {
         // Skip rendering entirely; the panel stays black until something wakes it
