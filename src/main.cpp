@@ -322,7 +322,12 @@ static void _reconcileRound() {
     if (g_selectedPilotId <= 0) return;
     HistRound r;
     if (!g_history.load(0, r) || !r.valid || r.count == 0) return;
-    g_comms.resendRound(g_selectedPilotId, r.flightMs, r.altitudeM, r.count);
+    // Never report altitudes on an F3K round — it has none, so anything here can
+    // only be stale. [I-28] fixes the NVS leak that produced them; this is the
+    // second line of defence, because a bogus altitude silently corrupts scoring.
+    const bool isF5K = (r.discipline[1] == '5');
+    g_comms.resendRound(g_selectedPilotId, r.flightMs,
+                        isF5K ? r.altitudeM : nullptr, r.count);
 }
 
 void loop() {

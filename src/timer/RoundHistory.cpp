@@ -53,6 +53,13 @@ void RoundHistory::recordFlight(unsigned long durationMs) {
     char key[8];
     _kn(0, key); _prefs.putUChar(key, _current.count);
     _kf(0, i, key); _prefs.putUInt(key, (uint32_t)durationMs);
+    // Clear this slot's stored altitude too. startRound() memsets the RAM copy but
+    // _saveSlot only writes keys for i < count, and count is 0 there — so it writes
+    // no altitude keys at all and the previous round's r0aN survive in NVS. Reading
+    // slot 0 back then produced altitudes nobody entered: wrong heights in ROUND
+    // RECALL, and once the end-of-round resend existed, F5K altitudes reported on
+    // an F3K round. [I-28]
+    _ka(0, i, key); _prefs.putShort(key, 0);
 #endif
 }
 
