@@ -79,6 +79,16 @@ void TimerComms::update() {
                     _tcp.stop();
                     Serial.printf("[COMMS] TCP connect attempt → %s:%d\n", BASE_HOST, BASE_PORT);
                     if (_tcp.connect(BASE_HOST, BASE_PORT)) {
+                        // Nagle off. Every message here is small, so with Nagle on
+                        // lwIP holds a write whenever anything is still unACKed at
+                        // the TCP level — which is precisely what a degraded link
+                        // causes. Measured on the bench: with the base's ACKs
+                        // blackholed, a FLIGHT and two application-level retries all
+                        // sat in the send buffer and went out only when the link
+                        // came back, so the 5 s retry was doing nothing on the wire.
+                        // There is nothing to coalesce in a low-rate command
+                        // protocol; delivery latency matters far more than packets.
+                        _tcp.setNoDelay(true);
                         // Re-apply power save disable after WPA association. The IDF
                         // resets to WIFI_PS_MIN_MODEM during the handshake, so calling
                         // this only in begin() is not enough — re-apply once TCP is up.
@@ -187,6 +197,33 @@ void TimerComms::sendAltitude(int pilotId, int flightNo, int altM) {
     char buf[64];
     snprintf(buf, sizeof(buf), "ALTITUDE pilot=%d flight=%d alt=%d", pilotId, flightNo, altM);
     _sendOrQueue(buf);
+#endif
+}
+
+void TimerComms::resendRound(int pilotId, const uint32_t* durations,
+                             const int16_t* altitudes, int count) {
+#ifndef WOKWI_SIM
+    // No pilot means the base cannot attribute any of it; a resend would be
+    // discarded exactly like the original was. Nothing useful to do here.
+    if (pilotId <= 0 || count <= 0 || durations == nullptr) return;
+
+    Serial.printf("[COMMS] Round reconcile: re-reporting %d flight(s) for pilot=%d\n",
+                  count, pilotId);
+    for (int i = 0; i < count; ++i) {
+        char buf[PENDING_LINE];
+        // rc=1 marks this as a reconciliation copy, so the base can tell a
+        // recovered flight from a normal one and say so on the run page. Older
+        // bases ignore unknown params and treat it as an ordinary FLIGHT.
+        snprintf(buf, sizeof(buf), "FLIGHT pilot=%d dur=%lu rc=1",
+                 pilotId, (unsigned long)durations[i]);
+        _sendOrQueue(buf);
+        // 0 = not recorded (F3K, or an F5K flight whose altitude is still to come).
+        if (altitudes != nullptr && altitudes[i] > 0) {
+            snprintf(buf, sizeof(buf), "ALTITUDE pilot=%d flight=%d alt=%d rc=1",
+                     pilotId, i + 1, (int)altitudes[i]);
+            _sendOrQueue(buf);
+        }
+    }
 #endif
 }
 

@@ -43,6 +43,21 @@ public:
     void sendAltitude(int pilotId, int flightNo, int altM);
     void sendSelect(int pilotId);
 
+    // End-of-round reconciliation: re-report the whole round from NVS so a gap
+    // opened during the round gets a second chance to close.
+    //
+    // The ACK queue cannot cover every loss. `ACK` means "received and decided",
+    // so a FLIGHT the base deliberately discards — above all one arriving with
+    // pilot=0 after a reconnect lost the binding — is ACKed and dropped, and the
+    // timer clears it believing it landed. A full pending buffer and a reboot
+    // mid-round are silent the same way. Losing a time is the worst outcome the
+    // system has, so it gets a belt-and-braces pass.
+    //
+    // Safe to call repeatedly: the base dedups on (pilot, group, duration), so a
+    // flight it already holds is suppressed and only genuine gaps are filled.
+    void resendRound(int pilotId, const uint32_t* durations,
+                     const int16_t* altitudes, int count);
+
 private:
     CommsState _state         = COMMS_IDLE;
     int        _timerId       = -1;
@@ -92,7 +107,11 @@ private:
     //
     // A plain array rather than the previous ring: ACKs let entries leave from
     // the middle, which a head/tail ring cannot express.
-    static const int PENDING_MAX  = 16;
+    // 32, not 16: an end-of-round resendRound() can queue up to MAX_FLIGHTS
+    // flights plus the same number of altitudes (20 on a full F5K round) in one
+    // go, on top of whatever normal traffic is still unACKed. Overflowing drops
+    // messages — the exact loss the resend exists to prevent.
+    static const int PENDING_MAX  = 32;
     static const int PENDING_LINE = 64;
     struct PendingMsg {
         char          line[PENDING_LINE];

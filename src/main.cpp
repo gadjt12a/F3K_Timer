@@ -314,6 +314,17 @@ static void _recordFlight() {
     }
 }
 
+// Re-report the finished round so anything lost on the way to the base gets a
+// second chance. Sourced from NVS rather than the live FlightLog on purpose:
+// RoundHistory holds exactly the valid, scoreable flights (a jumped start goes to
+// the log scratched but never to history) and it survives a reboot mid-round.
+static void _reconcileRound() {
+    if (g_selectedPilotId <= 0) return;
+    HistRound r;
+    if (!g_history.load(0, r) || !r.valid || r.count == 0) return;
+    g_comms.resendRound(g_selectedPilotId, r.flightMs, r.altitudeM, r.count);
+}
+
 void loop() {
     g_btns.update();
     g_wt.update();
@@ -572,6 +583,11 @@ void loop() {
                     g_altitudeM = 0;
                     // Stay in STATE_ALTITUDE_ENTRY — _needsRender detects flightNo change
                 } else {
+                    // Second reconcile pass, and the only one that can carry
+                    // altitudes: the pass at WORKING_TIME_EXPIRED runs before any
+                    // altitude has been entered. Must come before the pilot binding
+                    // is cleared, or there is nothing left to attribute it to.
+                    _reconcileRound();
                     g_selectedPilotName[0] = '\0';
                     g_selectedPilotId = 0;
                     g_state = STATE_IDLE;
@@ -763,6 +779,17 @@ void loop() {
         _wakeScreen();
     }
 #endif
+
+    // Reconcile on the transition into the results screen, wherever it came from.
+    // Nine separate paths reach WORKING_TIME_EXPIRED — WT expiry, CD STOP, abort
+    // from prep/countdown/landing, scratch-confirm timeout — so hooking the
+    // transition rather than each call site means a path added later cannot
+    // silently skip the safety net.
+    static AppState s_prevState = STATE_IDLE;
+    if (g_state != s_prevState) {
+        if (g_state == STATE_WORKING_TIME_EXPIRED) _reconcileRound();
+        s_prevState = g_state;
+    }
 
     int curWtSecs = g_wt.getRemaining();
     if (!g_screenAsleep && _screenMaySleep(g_state) &&
