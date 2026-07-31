@@ -1,0 +1,16 @@
+F3K Timer fw-v28
+Date: 2026-07-31
+Source commit: 08bb593
+
+Flash addresses (esptool):
+  0x00000  bootloader.bin
+  0x08000  partitions.bin
+  0x10000  firmware.bin
+
+esptool command:
+  esptool.py --chip esp32s3 --port COM4 --baud 921600 write_flash 0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+
+Wire-flashing from the base station Pi instead: see SESSION_STATE.md
+"Flashing the timer from the Pi". Needs --no-stub, and if the device has taken
+an OTA since its last wired flash, otadata at 0xe000 must be cleared or the
+bootloader keeps launching the other slot and the flash appears to do nothing.
