@@ -36,6 +36,17 @@ void OtaUpdater::check() {
     xTaskCreate(_checkTask, "OTA_CHK", 4096, this, 3, nullptr);
 }
 
+// The OTA screen is reachable in well under the ~20 s the radio takes to
+// associate after a boot, and check() runs once on entry — so arriving early
+// left a red NO WIFI on screen that never cleared, and the only way to retry was
+// to back out and walk the four settings holds again. Now the check re-fires by
+// itself the moment WiFi is up.
+void OtaUpdater::retryIfWifiReturned() {
+    if ((OtaStatus)_status != OTA_NO_WIFI) return;
+    if (WiFi.status() != WL_CONNECTED)     return;
+    check();
+}
+
 void OtaUpdater::startUpdate() {
     if ((OtaStatus)_status != OTA_AVAILABLE) return;
     _status   = (uint8_t)OTA_DOWNLOADING;

@@ -10,6 +10,12 @@ public:
     void check();        // async version check (FreeRTOS task)
     void startUpdate();  // async firmware download + flash (FreeRTOS task)
 
+    // Re-run a check that failed only because the radio was not up yet. Safe to
+    // call every loop: it does nothing unless the status is OTA_NO_WIFI and WiFi
+    // has since associated. Keeps the WiFi dependency in here rather than making
+    // main.cpp include WiFi.h to ask the same question.
+    void retryIfWifiReturned();
+
     OtaStatus   getStatus()           const { return (OtaStatus)_status; }
     int         getProgress()         const { return _progress; }
     const char* getAvailableVersion() const { return _availVer; }

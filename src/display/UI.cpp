@@ -1354,6 +1354,10 @@ void UI::_drawOtaCheck(OtaStatus status, int progress, const char* availVer) {
     if (!busy) {
         if (status == OTA_AVAILABLE) {
             _drawFontCentered("HOLD R = UPDATE", WS_CX, 370, COL_WHITE, &FreeSans12pt7b);
+        } else if (status == OTA_FAILED || status == OTA_NO_WIFI) {
+            // A dead end otherwise: without this the only way to re-run a check
+            // is to exit and walk the four settings holds again.
+            _drawFontCentered("L = RETRY", WS_CX, 370, COL_WHITE, &FreeSans12pt7b);
         }
         _drawFontCentered("R = EXIT", WS_CX, 408, COL_DIMGRAY, &FreeSans9pt7b);
     }

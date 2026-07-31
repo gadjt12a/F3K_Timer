@@ -700,6 +700,8 @@ void loop() {
 
         case STATE_OTA_CHECK: {
 #ifdef WAVESHARE_HW
+            // Clears a NO WIFI left by arriving here before the radio associated.
+            g_ota.retryIfWifiReturned();
             OtaStatus ota = g_ota.getStatus();
             // No inactivity timeout here: R is the only way out.
             //
@@ -717,6 +719,12 @@ void loop() {
                 } else if (btnR) {
                     g_state = STATE_IDLE;
                     break;
+                } else if (btnL) {
+                    // Manual re-check. The auto-retry above only covers NO_WIFI;
+                    // a FAILED (base station unreachable, or serving something
+                    // unparseable) needs a way back that is not four settings
+                    // holds. Harmless on the other statuses.
+                    g_ota.check();
                 }
             }
 #else
@@ -779,8 +787,18 @@ void loop() {
 #ifdef WAVESHARE_HW
     // An OTA check or download is progress the user is watching, with no button
     // presses to keep it alive. Treat it as activity in its own right.
+    //
+    // OTA_AVAILABLE counts too, and for a different reason: the screen is asking
+    // a question and waiting for an answer. It used to blank after the 2 min
+    // inactivity period with the offer still on it, which reads as a hang right
+    // at the moment the user is deciding whether to trust a firmware update.
+    // The terminal states (UP_TO_DATE, FAILED, NO_WIFI, IDLE) are deliberately
+    // left blankable — nothing is pending, and this screen has no auto-exit, so
+    // a timer parked here overnight would otherwise ghost the panel.
     if (g_state == STATE_OTA_CHECK &&
-        (g_ota.getStatus() == OTA_CHECKING || g_ota.getStatus() == OTA_DOWNLOADING)) {
+        (g_ota.getStatus() == OTA_CHECKING   ||
+         g_ota.getStatus() == OTA_DOWNLOADING ||
+         g_ota.getStatus() == OTA_AVAILABLE)) {
         _wakeScreen();
     }
 #endif
