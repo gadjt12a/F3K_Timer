@@ -34,7 +34,10 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 - **Connection indicator** — idle screen shows BASE… (grey) while connecting, BASE OK (green) when live; BASE OK replaced by pilot name once a pilot is selected
 - **NVS round history (ROUND RECALL)** — stores last 3 rounds (discipline, pilot name, flight times, F5K altitudes) to ESP32 NVS; each flight written immediately so data survives power loss mid-round; accessible via `STATE_HISTORY` from the expired screen (L) or settings chain; "N of 3" slot indicator, L=older / R=newer/exit, 8s inactivity timeout
 - **Pilot decouple** — timer clears pilot binding automatically when returning to idle after a completed round
-- **OTA firmware updates** — settings page 3 checks for updates from the base station HTTP server; R hold applies the update; device reboots automatically when done. **No inactivity timeout on this screen — R is the only way out.** It previously auto-exited after 8s, and `OTA_CHECKING` was not treated as busy, so the screen bounced back to IDLE while the version request was still in flight and the check never completed. A timeout is wrong here regardless: fetching and flashing are slow by nature and the user is watching.
+- **OTA firmware updates** — settings **page 4** (R-hold ×4 from idle; pages 2 and 3 also self-advance on their timeouts) checks for updates from the base station HTTP server; R hold applies the update; device reboots automatically when done. Verified end to end on hardware in session 64: check → download → flash → self-reboot, confirmed by the version in the next `JOIN`. **No inactivity timeout on this screen — R is the only way out.** It previously auto-exited after 8s, and `OTA_CHECKING` was not treated as busy, so the screen bounced back to IDLE while the version request was still in flight and the check never completed. A timeout is wrong here regardless: fetching and flashing are slow by nature and the user is watching. L re-checks, and a `NO WIFI` result retries by itself once the radio associates.
+  - ⚠ **The check cannot tell an upgrade from a downgrade** — any version differing from the running one reads as "available", so a base station serving an old build will offer to take the timer *backwards* with nothing on screen to say so.
+  - ⚠ **Wire-flashing a device that has taken an OTA needs `otadata` cleared first.** It is then running from `ota_1`, so `write_flash 0x10000` writes the slot that is not running: esptool reports `Hash of data verified` and the device boots the **old** firmware. Confirm the running build from the base station's `JOIN … fw=`, never from the flash succeeding.
+- **OTA diagnostics** — `[OTA]` serial lines cover every exit path of a check (heap, stack high-water mark, HTTP code, raw payload, parsed version, final status). Added in fw-v27 after a screen that appeared hung turned out to be a 30 ms check plus a render race; without logging the only evidence was the base station's `200 OK`, which proved nothing about what happened next.
 
 ## Hardware
 
@@ -105,10 +108,15 @@ TASK_SELECT  (page 2: task type)
   R or L click → toggle F3K / F5K
   R hold / 3s timeout → OTA_CHECK
 
-OTA_CHECK  (page 3: firmware update)
+OTA_CHECK  (page 4: firmware update — page 3 is ROUND RECALL)
   on entry   → async version check to base station :8080
   R hold     → download + flash update (when available)
+  L click    → re-check (recovers NO WIFI / FAILED without leaving the screen)
   R click    → IDLE   (no inactivity timeout — see note)
+  auto-retry → a NO WIFI check re-fires by itself once the radio associates
+  stays lit while CHECKING / DOWNLOADING / UPDATE AVAILABLE; a pending
+  decision must not blank. Terminal states may still sleep (no auto-exit,
+  so the panel would otherwise ghost).
 
 PILOT_SELECT  (base station only)
   R click      → next pilot
@@ -138,6 +146,9 @@ SCREEN SLEEP  (overlays every state; AMOLED burn-in)
     bench (USB):    every state, including a live round
   any button, or a change of screen → wake + full repaint
   SCREEN t=N from base → forced on for N seconds (0 releases)
+  NOTE: the waking press is NOT swallowed — it also acts on the current
+        screen, so on IDLE-while-connected (start buttons locked) a click
+        is a pure wake, but elsewhere it does its normal job as well
 ```
 
 ## Base Station
