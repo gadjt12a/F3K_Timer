@@ -35,7 +35,7 @@ A hand-held competition timer for a **caller** — the pilot's field assistant w
 - **NVS round history (ROUND RECALL)** — stores last 3 rounds (discipline, pilot name, flight times, F5K altitudes) to ESP32 NVS; each flight written immediately so data survives power loss mid-round; accessible via `STATE_HISTORY` from the expired screen (L) or settings chain; "N of 3" slot indicator, L=older / R=newer/exit, 8s inactivity timeout
 - **Pilot decouple** — timer clears pilot binding automatically when returning to idle after a completed round
 - **OTA firmware updates** — settings **page 4** (R-hold ×4 from idle; pages 2 and 3 also self-advance on their timeouts) checks for updates from the base station HTTP server; R hold applies the update; device reboots automatically when done. Verified end to end on hardware in session 64: check → download → flash → self-reboot, confirmed by the version in the next `JOIN`. **No inactivity timeout on this screen — R is the only way out.** It previously auto-exited after 8s, and `OTA_CHECKING` was not treated as busy, so the screen bounced back to IDLE while the version request was still in flight and the check never completed. A timeout is wrong here regardless: fetching and flashing are slow by nature and the user is watching. L re-checks, and a `NO WIFI` result retries by itself once the radio associates.
-  - ⚠ **The check cannot tell an upgrade from a downgrade** — any version differing from the running one reads as "available", so a base station serving an old build will offer to take the timer *backwards* with nothing on screen to say so.
+  - **Only a strictly newer build is offered.** Equal reads `UP TO DATE`; an *older* build on the base station shows orange `BASE IS OLDER` / `UPDATE THE BASE` and no update is offered — the base station is the stale one there, and `startUpdate()` gates on `OTA_AVAILABLE`, so the refusal is enforced rather than merely displayed. ⚠ The comparison is **numeric** (`_fwNum`): `fw-v9` sorts above `fw-v28` as a string, so comparing the strings would be worse than an equality test.
   - ⚠ **Wire-flashing a device that has taken an OTA needs `otadata` cleared first.** It is then running from `ota_1`, so `write_flash 0x10000` writes the slot that is not running: esptool reports `Hash of data verified` and the device boots the **old** firmware. Confirm the running build from the base station's `JOIN … fw=`, never from the flash succeeding.
 - **OTA diagnostics** — `[OTA]` serial lines cover every exit path of a check (heap, stack high-water mark, HTTP code, raw payload, parsed version, final status). Added in fw-v27 after a screen that appeared hung turned out to be a 30 ms check plus a render race; without logging the only evidence was the base station's `200 OK`, which proved nothing about what happened next.
 
@@ -112,6 +112,7 @@ OTA_CHECK  (page 4: firmware update — page 3 is ROUND RECALL)
   on entry   → async version check to base station :8080
   R hold     → download + flash update (when available)
   L click    → re-check (recovers NO WIFI / FAILED without leaving the screen)
+  offered version older than ours → BASE IS OLDER, no update offered
   R click    → IDLE   (no inactivity timeout — see note)
   auto-retry → a NO WIFI check re-fires by itself once the radio associates
   stays lit while CHECKING / DOWNLOADING / UPDATE AVAILABLE; a pending
