@@ -42,7 +42,9 @@ static const int ALERT_COUNT   = 14;
 // Blank the AMOLED after this long on the idle screen. Burn-in protection: the
 // idle screen is nearly all static, and a timer left powered — on the bench, or
 // cabled to the base station for remote development — will ghost it permanently.
-// Only ever applies in STATE_IDLE, so it cannot blank a live round.
+// Applies to any screen _screenMaySleep() allows, not just STATE_IDLE — the
+// results screen ghosts just as readily. A live round is protected in the field
+// but may blank on the bench; see _screenMaySleep() in main.cpp.
 #define SCREEN_SLEEP_MS        120000  // 2 minutes
 
 // ── Flight log ────────────────────────────────────────────────────────────────

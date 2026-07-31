@@ -1278,6 +1278,24 @@ void UI::renderOtaCheck(OtaStatus status, int progress, const char* availVer) {
 
 void UI::blank() {
     _clearScreen();
+    // Every screen here draws incrementally off a cache of what it last put on
+    // the panel, and blanking invalidates all of it — the pixels are gone but
+    // the cache still claims they are there. Without this reset the first render
+    // after a wake takes the "nothing changed" branch and repaints only the one
+    // element that happens to differ: on IDLE that is the battery, drawn onto an
+    // otherwise black screen with no GLIDE title, no timer ID.
+    //
+    // main.cpp's _lastState reset (see _wakeScreen) is not enough on its own —
+    // that one only decides whether render() is *called*. This is the copy that
+    // decides what render() actually draws.
+    _prevState       = (AppState)255;
+    _prevConnState   = (BaseConnState)255;
+    _prevBatteryPct  = -1;
+    _prevWtSecs      = -1;
+    _prevFlashSecs   = -1;
+    _prevAltFlightNo = -1;
+    _prevPrepDs      = -1;
+    _arcVisible      = true;
 #ifndef WOKWI_SIM
     _gfx->flush();
 #endif
