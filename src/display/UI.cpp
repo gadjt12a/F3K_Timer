@@ -1344,6 +1344,10 @@ void UI::_drawOtaCheck(OtaStatus status, int progress, const char* availVer) {
                               statusCol = COL_RED;                               break;
         case OTA_NO_WIFI:     strcpy(statusBuf, "NO WIFI");
                               statusCol = COL_RED;                               break;
+        // Not an error for this timer — the base station is behind. Say whose
+        // fault it is, or the CD stands there wondering why it will not update.
+        case OTA_BASE_OLDER:  strcpy(statusBuf, "BASE IS OLDER");
+                              statusCol = COL_ORANGE;                            break;
     }
     if (statusBuf[0]) {
         _drawFontCentered(statusBuf, WS_CX, WS_CY + 50, statusCol, &FreeSans12pt7b);
@@ -1354,6 +1358,9 @@ void UI::_drawOtaCheck(OtaStatus status, int progress, const char* availVer) {
     if (!busy) {
         if (status == OTA_AVAILABLE) {
             _drawFontCentered("HOLD R = UPDATE", WS_CX, 370, COL_WHITE, &FreeSans12pt7b);
+        } else if (status == OTA_BASE_OLDER) {
+            // Nothing this timer can do — point at the thing that needs fixing.
+            _drawFontCentered("UPDATE THE BASE", WS_CX, 370, COL_ORANGE, &FreeSans12pt7b);
         } else if (status == OTA_FAILED || status == OTA_NO_WIFI) {
             // A dead end otherwise: without this the only way to re-run a check
             // is to exit and walk the four settings holds again.

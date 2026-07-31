@@ -59,7 +59,8 @@ enum OtaStatus : uint8_t {
     OTA_DOWNLOADING,
     OTA_SUCCESS,
     OTA_FAILED,
-    OTA_NO_WIFI
+    OTA_NO_WIFI,
+    OTA_BASE_OLDER      // base station is serving an OLDER build than we run
 };
 
 // ── OTA server (base station HTTP, same AP as timer comms) ────────────────────

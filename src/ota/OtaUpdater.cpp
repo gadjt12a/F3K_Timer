@@ -8,6 +8,30 @@
 #include <esp_task_wdt.h>
 #include "fw_version.h"
 
+// Release number from a version string: "fw-v28" -> 28, or -1 if unparseable.
+//
+// The check used to be `strcmp(ver, FW_VERSION) != 0`, i.e. *any* difference
+// meant "an update is available" — so a base station holding an old build would
+// offer to take this timer backwards, with nothing on screen to say so. That is
+// a real field risk: a CD updates the timers, forgets the Pi, and then "updates"
+// a timer straight back onto older firmware mid-competition.
+//
+// Note this must compare numbers, not strings: "fw-v9" sorts above "fw-v28"
+// lexically, so a string compare would be worse than the equality test it
+// replaces. [I-41]
+static int _fwNum(const char* ver) {
+    if (!ver) return -1;
+    if (strncmp(ver, "fw-v", 4) != 0) return -1;
+    const char* p = ver + 4;
+    if (*p == '\0') return -1;
+    int n = 0;
+    for (; *p; ++p) {
+        if (*p < '0' || *p > '9') return -1;
+        n = n * 10 + (*p - '0');
+    }
+    return n;
+}
+
 // Extract "version" field from {"version":"fw-v10",...}
 static bool _parseVersionJson(const char* json, char* out, size_t len) {
     const char* key = "\"version\":\"";
@@ -104,10 +128,32 @@ void OtaUpdater::_checkTask(void* pv) {
             if (_parseVersionJson(payload.c_str(), ver, sizeof(ver))) {
                 strncpy(self->_availVer, ver, sizeof(self->_availVer) - 1);
                 self->_availVer[sizeof(self->_availVer) - 1] = '\0';
-                bool same = (strcmp(ver, FW_VERSION) == 0);
-                self->_status = (uint8_t)(same ? OTA_UP_TO_DATE : OTA_AVAILABLE);
-                Serial.printf("[OTA] Available=%s running=%s -> %s\n",
-                              ver, FW_VERSION, same ? "UP_TO_DATE" : "AVAILABLE");
+
+                // Only a strictly newer build is an update. Equal is up to date;
+                // older means the *base station* is stale, and we say so rather
+                // than offering to flash backwards. Unparseable on either side
+                // falls back to "different means available" so a future naming
+                // scheme cannot silently disable updates altogether.
+                int remote = _fwNum(ver);
+                int local  = _fwNum(FW_VERSION);
+                const char* why;
+                if (remote < 0 || local < 0) {
+                    bool same = (strcmp(ver, FW_VERSION) == 0);
+                    self->_status = (uint8_t)(same ? OTA_UP_TO_DATE : OTA_AVAILABLE);
+                    why = same ? "UP_TO_DATE (unparseable, equal)"
+                               : "AVAILABLE (unparseable, differs)";
+                } else if (remote > local) {
+                    self->_status = (uint8_t)OTA_AVAILABLE;
+                    why = "AVAILABLE";
+                } else if (remote == local) {
+                    self->_status = (uint8_t)OTA_UP_TO_DATE;
+                    why = "UP_TO_DATE";
+                } else {
+                    self->_status = (uint8_t)OTA_BASE_OLDER;
+                    why = "BASE_OLDER (refusing downgrade)";
+                }
+                Serial.printf("[OTA] Offered=%s running=%s -> %s\n",
+                              ver, FW_VERSION, why);
             } else {
                 Serial.println("[OTA] Payload did not parse -> OTA_FAILED");
                 self->_status = (uint8_t)OTA_FAILED;
