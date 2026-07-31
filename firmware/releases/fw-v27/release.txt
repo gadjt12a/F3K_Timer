@@ -1,0 +1,16 @@
+F3K Timer fw-v27
+Date: 2026-07-31
+Source commit: e6049ad
+
+Flash addresses (esptool):
+  0x00000  bootloader.bin
+  0x08000  partitions.bin
+  0x10000  firmware.bin
+
+esptool command:
+  esptool.py --chip esp32s3 --port COM4 --baud 921600 write_flash 0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+
+Note: this release was flashed over the wire from the base station Pi, not COM4:
+  esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 write_flash \
+    0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+The Pi holds /dev/ttyACM0 open via timer-serial-logger.py -- stop it first.
