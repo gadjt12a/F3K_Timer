@@ -40,6 +40,11 @@ public:
 
     void sendFlight(int pilotId, unsigned long durationMs);
     void sendJumped(int pilotId, unsigned long durationMs);  // jumped start — CD note only
+    // Caller discarded a flight already reported to the base. Identified by
+    // duration, the same key the base's dedup uses. ACK-gated like FLIGHT, so a
+    // scratch cannot be lost by a dropped link — which would leave the flight
+    // scoring at the base while the timer showed it struck through.
+    void sendScratch(int pilotId, unsigned long durationMs);
     void sendAltitude(int pilotId, int flightNo, int altM);
     void sendSelect(int pilotId);
 

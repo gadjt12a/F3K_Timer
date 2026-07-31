@@ -192,6 +192,14 @@ void TimerComms::sendJumped(int pilotId, unsigned long durationMs) {
 #endif
 }
 
+void TimerComms::sendScratch(int pilotId, unsigned long durationMs) {
+#ifndef WOKWI_SIM
+    char buf[64];
+    snprintf(buf, sizeof(buf), "SCRATCH pilot=%d dur=%lu", pilotId, durationMs);
+    _sendOrQueue(buf);
+#endif
+}
+
 void TimerComms::sendAltitude(int pilotId, int flightNo, int altM) {
 #ifndef WOKWI_SIM
     char buf[64];

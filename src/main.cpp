@@ -312,6 +312,9 @@ static void _recordFlight() {
     unsigned long dur = g_ft.stop();
     g_log.addFlight(dur);
     if (g_jumpedStart) {
+        // Deliberately no sendScratch() here, unlike the manual scratch: a jumped
+        // start is never sent as a FLIGHT in the first place (JUMPED goes instead,
+        // and is a CD note only), so there is no row at the base to scratch.
         g_log.scratchLast();
         g_jumpedStart = false;
         g_comms.sendJumped(g_selectedPilotId, dur);  // CD note only — never scored
@@ -632,8 +635,16 @@ void loop() {
                 break;
             }
             if (btnR) {
-                // R click: confirm scratch
-                g_log.scratchLast();
+                // R click: confirm scratch. The flight was reported to the base
+                // the moment it was flown, so scratching it locally is only half
+                // the job — without the SCRATCH the base keeps scoring it and it
+                // reaches the GliderScore export as a valid time. [I-42]
+                unsigned long scratched = g_log.scratchLast();
+                if (scratched > 0) {
+                    g_comms.sendScratch(g_selectedPilotId, scratched);
+                    Serial.printf("[MAIN] Scratched flight %.2fs — SCRATCH sent\n",
+                                  scratched / 1000.0f);
+                }
                 g_state = STATE_WORKING_TIME_RUNNING;
             } else if (millis() - g_scratchStartMs >= SCRATCH_CONFIRM_MS) {
                 // Timeout: cancel scratch

@@ -11,13 +11,14 @@ bool FlightLog::addFlight(unsigned long durationMs) {
     return true;
 }
 
-void FlightLog::scratchLast() {
+unsigned long FlightLog::scratchLast() {
     for (int i = _count - 1; i >= 0; i--) {
         if (!_flights[i].scratched) {
             _flights[i].scratched = true;
-            return;
+            return _flights[i].durationMs;
         }
     }
+    return 0;
 }
 
 Flight FlightLog::get(int i) const {
