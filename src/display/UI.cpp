@@ -1271,24 +1271,28 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
 void UI::renderOtaCheck(OtaStatus status, int progress, const char* availVer) {
     _clearScreen();
     _drawOtaCheck(status, progress, availVer);
+    // The OTA screen is now what is physically on the panel — record that, or
+    // leaving it for IDLE reads as "no change" and the firmware screen stays up.
+    _invalidateCache(STATE_OTA_CHECK);
 #ifndef WOKWI_SIM
     _gfx->flush();
 #endif
 }
 
-void UI::blank() {
-    _clearScreen();
-    // Every screen here draws incrementally off a cache of what it last put on
-    // the panel, and blanking invalidates all of it — the pixels are gone but
-    // the cache still claims they are there. Without this reset the first render
-    // after a wake takes the "nothing changed" branch and repaints only the one
-    // element that happens to differ: on IDLE that is the battery, drawn onto an
-    // otherwise black screen with no GLIDE title, no timer ID.
-    //
-    // main.cpp's _lastState reset (see _wakeScreen) is not enough on its own —
-    // that one only decides whether render() is *called*. This is the copy that
-    // decides what render() actually draws.
-    _prevState       = (AppState)255;
+// Every screen draws incrementally off a cache of what it last put on the panel,
+// and render() decides what to redraw purely by comparing against that cache. So
+// any code that rewrites the panel behind render()'s back has to say so here, or
+// the next render takes a "nothing changed" branch and leaves the old picture up.
+//
+// This has bitten three times, all the same shape: blank() wiping the screen
+// (I-37), and renderOtaCheck()/renderHistory() drawing a whole different screen
+// without render() ever being involved.
+//
+// main.cpp's _lastState reset (see _wakeScreen) is not a substitute — that one
+// only decides whether render() is *called*. This is the copy that decides what
+// render() draws once it is.
+void UI::_invalidateCache(AppState nowShowing) {
+    _prevState       = nowShowing;
     _prevConnState   = (BaseConnState)255;
     _prevBatteryPct  = -1;
     _prevWtSecs      = -1;
@@ -1296,6 +1300,13 @@ void UI::blank() {
     _prevAltFlightNo = -1;
     _prevPrepDs      = -1;
     _arcVisible      = true;
+}
+
+void UI::blank() {
+    _clearScreen();
+    // Nothing is on the panel at all, so no state can match: 255 forces the next
+    // render down its full-redraw path whatever screen it is for.
+    _invalidateCache((AppState)255);
 #ifndef WOKWI_SIM
     _gfx->flush();
 #endif
@@ -1356,6 +1367,9 @@ void UI::_drawOtaCheck(OtaStatus status, int progress, const char* availVer) {
 void UI::renderHistory(int slot, const HistRound& hist, int totalSlots) {
     _clearScreen();
     _drawHistory(slot, hist, totalSlots);
+    // Same as renderOtaCheck: round recall exits to IDLE or on to the OTA screen,
+    // and both transitions need render() to see a state change.
+    _invalidateCache(STATE_HISTORY);
 #ifndef WOKWI_SIM
     _gfx->flush();
 #endif

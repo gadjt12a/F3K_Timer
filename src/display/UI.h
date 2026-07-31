@@ -70,6 +70,12 @@ private:
     int      _prevBatteryPct = -1;      // Track battery changes
     int      _prevPrepDs   = -1;        // last drawn prep tenths (incremental redraw)
 
+    // Drop every incremental-draw cache and record what is actually on the panel
+    // now. Must be called by anything that rewrites the panel outside render() —
+    // blank(), renderOtaCheck(), renderHistory() — because render()'s redraw
+    // decisions are made purely from these fields. Pass 255 for "nothing".
+    void _invalidateCache(AppState nowShowing);
+
     void _drawRunningFull(bool flightActive,
                           const WorkingTime& wt,
                           const FlightTimer& ft,
