@@ -19,6 +19,7 @@ public:
     void update();
     void playAlert(int timeRemaining);
     void playWindowOpen();      // long high beep: WT window opening
+    void holdAmp(bool on);      // keep the amp powered for a whole round
     void silence();
     void testTone();
 
@@ -45,6 +46,7 @@ private:
     static TaskHandle_t  _toneTask;
     static int16_t*      _sineBuf;
     static bool          _taskAmpOn;
+    static bool          _ampHold;
 
     static void _toneTaskFunc(void* param);
     void _playToneBlocking(uint32_t freqHz, uint32_t durationMs);

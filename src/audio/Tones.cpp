@@ -40,6 +40,7 @@ QueueHandle_t Tones::_toneQueue = nullptr;
 TaskHandle_t  Tones::_toneTask = nullptr;
 int16_t*      Tones::_sineBuf = nullptr;
 bool          Tones::_taskAmpOn = false;
+bool          Tones::_ampHold  = false;
 
 // ES8311 I2C helper functions
 static bool es8311_write_reg(uint8_t reg, uint8_t val) {
@@ -266,11 +267,26 @@ void Tones::silence() {
 
 #ifdef WAVESHARE_HW
 void Tones::_ampEnable(bool on) {
+    // Powering the amp costs 50 ms of settling, and it was paid on EVERY tone
+    // because the amp was dropped again as soon as each one finished. That put a
+    // fixed 50 ms in front of every beep — half the gap between the timer and the
+    // base station's speaker. While a round is live the amp is held on, so only
+    // the first tone of the round pays it. [I-35]
+    if (!on && _ampHold) return;
     if (on != _taskAmpOn) {
         digitalWrite(PA_EN, on ? HIGH : LOW);
         _taskAmpOn = on;
         if (on) delay(50);  // Amp needs time to stabilize
     }
+}
+
+void Tones::holdAmp(bool on) {
+    _ampHold = on;
+    // Deliberately does NOT power the amp up here: _ampEnable(true) blocks for
+    // 50 ms and this is called from the main loop, which must not stall. The
+    // first tone of the round enables it — in the tone task, where blocking is
+    // already the norm — and every tone after that is immediate.
+    if (!on) _ampEnable(false);
 }
 
 void Tones::_toneTaskFunc(void* param) {

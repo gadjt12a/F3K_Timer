@@ -793,6 +793,9 @@ void loop() {
     static AppState s_prevState = STATE_IDLE;
     if (g_state != s_prevState) {
         if (g_state == STATE_WORKING_TIME_EXPIRED) _reconcileRound();
+        // Hold the audio amp up for the whole round so only the first beep pays
+        // the 50 ms power-on settle, instead of every one of them. [I-35]
+        g_tones.holdAmp(_roundLive(g_state));
         s_prevState = g_state;
     }
 
