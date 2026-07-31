@@ -188,9 +188,17 @@ static void _doRender(AppState state, int wtSecs) {
     }
 #ifdef WAVESHARE_HW
     if (state == STATE_OTA_CHECK) {
-        g_ui.renderOtaCheck(g_ota.getStatus(), g_ota.getProgress(), g_ota.getAvailableVersion());
-        _lastOtaStatus = g_ota.getStatus();
-        _lastOtaProg10 = g_ota.getProgress() / 10;
+        // Sample once. _status is volatile and written by the check task on
+        // another core, while this full-screen clear+draw+flush takes tens of ms
+        // — longer than a check takes to complete (~30 ms, measured). Reading it
+        // again after drawing recorded a status that was never rendered, so
+        // _needsRender() then compared equal and never repainted: the screen sat
+        // on CHECKING forever while the status had long since resolved. [I-40]
+        OtaStatus   otaStatus = g_ota.getStatus();
+        int         otaProg   = g_ota.getProgress();
+        g_ui.renderOtaCheck(otaStatus, otaProg, g_ota.getAvailableVersion());
+        _lastOtaStatus = otaStatus;
+        _lastOtaProg10 = otaProg / 10;
         _lastState     = state;
         return;
     }
