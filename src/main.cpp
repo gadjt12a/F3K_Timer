@@ -466,6 +466,14 @@ static void _judgeTarget(unsigned long durMs) {
 static void _recordFlight() {
     unsigned long dur = g_ft.stop();
     g_log.addFlight(dur);
+
+    // ⚠ Capture the target BEFORE judging it. _judgeTarget() clears g_targetS on
+    // a hit (Poker) or advances it (Ladder), so reading it afterwards would
+    // report target=0 for precisely the flights that achieved their call — the
+    // ones the score is made of.
+    const int  flightTargetS = g_targetS;
+    const bool flightWindow  = g_targetWindow;
+
     if (!g_jumpedStart) _judgeTarget(dur);   // a jumped start never had a target
     if (g_jumpedStart) {
         // Deliberately no sendScratch() here, unlike the manual scratch: a jumped
@@ -477,7 +485,7 @@ static void _recordFlight() {
         Serial.printf("[MAIN] Jumped start — flight %.2fs invalidated\n", dur / 1000.0f);
     } else {
         g_history.recordFlight(dur);
-        g_comms.sendFlight(g_selectedPilotId, dur);
+        g_comms.sendFlight(g_selectedPilotId, dur, flightTargetS, flightWindow);
     }
 }
 

@@ -49,7 +49,11 @@ public:
     int          getPilotCount()    const { return _pilotCount; }
     const Pilot& getPilot(int idx)  const { return _pilots[idx]; }
 
-    void sendFlight(int pilotId, unsigned long durationMs);
+    // `targetS` is the target this flight was flown against, 0 if none. Sent so
+    // the base can score Poker properly: FAI credits the ANNOUNCED time, never
+    // the flown one. `window` marks an "end of working time" (W) call. [I-50]
+    void sendFlight(int pilotId, unsigned long durationMs,
+                    int targetS = 0, bool window = false);
     void sendJumped(int pilotId, unsigned long durationMs);  // jumped start — CD note only
     // Caller discarded a flight already reported to the base. Identified by
     // duration, the same key the base's dedup uses. ACK-gated like FLIGHT, so a

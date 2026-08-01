@@ -177,10 +177,19 @@ bool TimerComms::hasLandStart()     { bool v = _hasLandStart;     _hasLandStart 
 bool TimerComms::hasScreenCmd()     { bool v = _hasScreenCmd;     _hasScreenCmd     = false; return v; }
 bool TimerComms::hasWtSync()        { bool v = _hasWtSync;        _hasWtSync        = false; return v; }
 
-void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
+void TimerComms::sendFlight(int pilotId, unsigned long durationMs,
+                            int targetS, bool window) {
 #ifndef WOKWI_SIM
-    char buf[64];
-    snprintf(buf, sizeof(buf), "FLIGHT pilot=%d dur=%lu", pilotId, durationMs);
+    char buf[96];
+    if (targetS > 0) {
+        // Appended, so an older base reads the pilot and duration it always did
+        // and ignores the rest. A flight with no target omits them entirely,
+        // which is what "no declaration" means on the wire.
+        snprintf(buf, sizeof(buf), "FLIGHT pilot=%d dur=%lu target=%d%s",
+                 pilotId, durationMs, targetS, window ? " tw=1" : "");
+    } else {
+        snprintf(buf, sizeof(buf), "FLIGHT pilot=%d dur=%lu", pilotId, durationMs);
+    }
     _sendOrQueue(buf);
 #endif
 }
