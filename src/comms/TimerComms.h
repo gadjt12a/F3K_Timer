@@ -26,8 +26,19 @@ public:
     bool hasPrepStart();        // base sent PREP t=N — read getPrepSeconds() before next call
     bool hasLandStart();        // base sent LAND t=N — read getLandSeconds() before next call
     bool hasScreenCmd();        // base sent SCREEN t=N — read getScreenSeconds() before next call
+    bool hasWtSync();           // base sent WTSYNC t=N — read getWtSyncSeconds() before next call
 
     int  getTaskWtSeconds() const { return _taskWtSeconds; }
+    int  getWtSyncSeconds() const { return _wtSyncSeconds; }
+
+    // How the base says this task should be run. `plain` unless told otherwise —
+    // a pre-v31 base sends no mode= at all, and guessing would have the timer
+    // demand a target that does not exist. [TF-10]
+    TargetMode  getTargetMode()   const { return _targetMode; }
+    int         getLadderStartS() const { return _ladderStartS; }
+    int         getLadderStepS()  const { return _ladderStepS; }
+    int         getPokerTargets() const { return _pokerTargets; }
+    const char* getTaskCode()     const { return _taskCode; }
     int  getTimerId()       const { return _timerId; }
     int  getCountdownN()    const { return _countdownN; }
     int  getPrepSeconds()   const { return _prepSeconds; }
@@ -79,6 +90,13 @@ private:
     bool _hasPrepStart    = false;
     bool _hasLandStart    = false;
     bool _hasScreenCmd    = false;
+    bool _hasWtSync       = false;
+    int  _wtSyncSeconds   = 0;
+    TargetMode _targetMode = TARGET_PLAIN;
+    int  _ladderStartS    = 30;
+    int  _ladderStepS     = 15;
+    int  _pokerTargets    = 3;
+    char _taskCode[8]     = "";
     int  _countdownN      = 0;
     int  _prepSeconds     = 0;
     int  _landSeconds     = 0;

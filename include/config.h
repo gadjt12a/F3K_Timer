@@ -68,6 +68,18 @@ enum OtaStatus : uint8_t {
 #define OTA_FIRMWARE_URL "http://" BASE_HOST ":8080/ota/firmware.bin"
 
 // ── Application states ────────────────────────────────────────────────────────
+// How the base says the current task should be flown. Sent as `mode=` on TASK.
+//
+// ⚠ TARGET_PLAIN must stay the default and the fallback for anything
+// unrecognised: a pre-v31 base sends no mode= at all, and a timer that guessed
+// TARGET_POKER would sit waiting for a declared target that nobody is going to
+// give it. Fail towards the behaviour that already exists. [TF-10]/[TF-11]
+enum TargetMode : uint8_t {
+    TARGET_PLAIN,      // flight time counts up; no target (every task today)
+    TARGET_POKER,      // pilot declares a target; W = rest of the working time
+    TARGET_LADDER      // target is the current rung; +step when reached
+};
+
 enum AppState : uint8_t {
     STATE_IDLE,
     STATE_WORKING_TIME_RUNNING,

@@ -27,6 +27,31 @@ void WorkingTime::reset() {
     for (int i = 0; i < ALERT_COUNT; i++) _fired[i] = false;
 }
 
+void WorkingTime::syncRemaining(int seconds) {
+    if (seconds < 0) seconds = 0;
+    _remainingMs = (unsigned long)seconds * 1000UL;
+
+    // Without this the next update() subtracts everything since the last tick and
+    // undoes the jump on the spot.
+    _lastUpdateMs = millis();
+
+    // Same ceiling as update() uses, so the alert bookkeeping below lines up with
+    // the comparison there. [I-33]
+    int alertSec  = (int)((_remainingMs + 999UL) / 1000UL);
+    _lastAlertSec = alertSec;
+
+    // Re-base which alerts have "already happened". A jump from 10:00 to 0:15
+    // leaves the 30 s and 20 s calls unfired, and without this they would all
+    // fire the instant the clock crossed them again — three announcements on top
+    // of each other. Thresholds still ahead of us are re-armed for the same
+    // reason in reverse, so a sync in either direction leaves a consistent state.
+    for (int i = 0; i < ALERT_COUNT; i++) {
+        _fired[i] = (ALERT_TIMES[i] >= alertSec);
+    }
+
+    if (_remainingMs == 0) _running = false;
+}
+
 void WorkingTime::update() {
     if (!_running) return;
 

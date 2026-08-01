@@ -351,7 +351,23 @@ void loop() {
     if (g_comms.hasTaskUpdate()) {
         g_wtMinutes = g_comms.getTaskWtSeconds() / 60;
         g_isF5K     = g_comms.isF5K();
-        Serial.printf("[MAIN] Task update from base: %d min, %s\n", g_wtMinutes, g_isF5K ? "F5K" : "F3K");
+        Serial.printf("[MAIN] Task update from base: %d min, %s, task=%s mode=%d\n",
+                      g_wtMinutes, g_isF5K ? "F5K" : "F3K",
+                      g_comms.getTaskCode(), (int)g_comms.getTargetMode());
+    }
+
+    // Base is the master clock. Only meaningful while working time is actually
+    // running — outside that there is no clock to steer, and applying it would
+    // put a stale number on an idle screen. [I-51]
+    if (g_comms.hasWtSync()) {
+        const int secs = g_comms.getWtSyncSeconds();
+        if (g_state == STATE_WORKING_TIME_RUNNING || g_state == STATE_FLIGHT_RUNNING) {
+            g_wt.syncRemaining(secs);
+            Serial.printf("[MAIN] Working time synced to %ds by base\n", secs);
+        } else {
+            Serial.printf("[MAIN] WTSYNC %ds ignored — state=%d, no working clock\n",
+                          secs, (int)g_state);
+        }
     }
 
     if (g_comms.hasPilotList() &&

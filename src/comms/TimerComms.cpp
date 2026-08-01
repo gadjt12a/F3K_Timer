@@ -175,6 +175,7 @@ bool TimerComms::hasCountdown()     { bool v = _hasCountdown;     _hasCountdown 
 bool TimerComms::hasPrepStart()     { bool v = _hasPrepStart;     _hasPrepStart     = false; return v; }
 bool TimerComms::hasLandStart()     { bool v = _hasLandStart;     _hasLandStart     = false; return v; }
 bool TimerComms::hasScreenCmd()     { bool v = _hasScreenCmd;     _hasScreenCmd     = false; return v; }
+bool TimerComms::hasWtSync()        { bool v = _hasWtSync;        _hasWtSync        = false; return v; }
 
 void TimerComms::sendFlight(int pilotId, unsigned long durationMs) {
 #ifndef WOKWI_SIM
@@ -317,8 +318,39 @@ void TimerComms::_parseLine(const char* line) {
         _taskWtSeconds = atoi(line + 8);
         const char* disc = strstr(line, "disc=");
         _isF5K = disc && strncmp(disc + 5, "F5K", 3) == 0;
+
+        // Everything below is optional. A pre-v31 base sends none of it, so every
+        // field must fall back to what the timer did before. [TF-10]/[TF-11]
+        _taskCode[0] = '\0';
+        if (const char* t = strstr(line, "task=")) {
+            size_t n = 0;
+            for (const char* p = t + 5; *p && *p != ' ' && n < sizeof(_taskCode) - 1; p++)
+                _taskCode[n++] = *p;
+            _taskCode[n] = '\0';
+        }
+
+        _targetMode = TARGET_PLAIN;
+        if (const char* m = strstr(line, "mode=")) {
+            if      (strncmp(m + 5, "poker",  5) == 0) _targetMode = TARGET_POKER;
+            else if (strncmp(m + 5, "ladder", 6) == 0) _targetMode = TARGET_LADDER;
+            // Anything else, including a mode we have never heard of, stays plain.
+        }
+
+        if (const char* v = strstr(line, "start="))   _ladderStartS = atoi(v + 6);
+        if (const char* v = strstr(line, "step="))    _ladderStepS  = atoi(v + 5);
+        if (const char* v = strstr(line, "targets=")) _pokerTargets = atoi(v + 8);
+
         _hasTaskUpdate = true;
-        Serial.printf("[COMMS] Task update: WT=%ds disc=%s\n", _taskWtSeconds, _isF5K ? "F5K" : "F3K");
+        Serial.printf("[COMMS] Task update: WT=%ds disc=%s task=%s mode=%d\n",
+                      _taskWtSeconds, _isF5K ? "F5K" : "F3K",
+                      _taskCode[0] ? _taskCode : "?", (int)_targetMode);
+
+    } else if (strncmp(line, "WTSYNC t=", 9) == 0) {
+        // The base is the master clock: this many seconds of working time left,
+        // as of now. Nothing else about the round changes. [I-51]
+        _wtSyncSeconds = atoi(line + 9);
+        _hasWtSync     = true;
+        Serial.printf("[COMMS] Working time sync: %ds remaining\n", _wtSyncSeconds);
 
     } else if (strcmp(line, "START") == 0) {
         _hasStartCommand = true;
