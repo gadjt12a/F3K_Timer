@@ -39,6 +39,25 @@ static unsigned long g_settingsLastMs  = 0;    // tracks inactivity for auto-con
 static int  g_altitudeM   = 0;
 static int  g_altFlightNo = 0;  // 1-based index of flight being entered; 0 = not started
 
+// ── Target tasks: Poker and Ladder ───────────────────────────────────────────
+// One mechanism, two sources for the target: the pilot's call (Poker) or the
+// current rung (Ladder). Both count the flight DOWN to the target and re-fly the
+// same target on a miss. [TF-10]/[TF-11]
+static int  g_targetS       = TARGET_NONE_S;  // armed target, seconds; 0 = none
+static bool g_targetWindow  = false;          // armed target was a W ("end of working time")
+static bool g_windowUsed    = false;          // a W has been called this round — one attempt only
+static int  g_targetsScored = 0;              // achieved targets so far (Poker: max 3)
+// Picker scratch state, committed to g_target* only on confirm.
+static int  g_pickMin       = 0;
+static int  g_pickSec       = 0;
+static bool g_pickWindow    = false;
+static bool g_pickNone      = true;           // the "---" position: confirm to clear
+static AppState g_pickReturnState = STATE_WORKING_TIME_RUNNING;
+// Outcome flash on the working-time screen, instead of a screen to dismiss —
+// there is no room for one in a turn-around.
+static unsigned long g_targetMsgUntilMs = 0;
+static bool          g_targetMsgHit     = false;
+
 // Task type: false = F3K (no altitude), true = F5K (altitude entry after round)
 static bool g_isF5K = false;
 static unsigned long g_taskSelectLastMs = 0;
@@ -97,6 +116,10 @@ static int           _lastTimerId     = -2;  // -2 = "never rendered"
 static int           _lastHistSlot    = -1;
 static int           _lastPrepDispDs  = -1;
 static int           _lastLandDispS   = -1;
+static int           _lastPickMin     = -1;
+static int           _lastPickSec     = -1;
+static bool          _lastPickWindow  = false;
+static bool          _lastPickNone    = false;
 #ifdef WAVESHARE_HW
 static OtaStatus     _lastOtaStatus   = OTA_IDLE;
 static int           _lastOtaProg10   = -1;  // progress in 10% increments
@@ -119,6 +142,9 @@ static bool _roundLive(AppState s) {
         case STATE_FLIGHT_RUNNING:
         case STATE_SCRATCH_CONFIRM:
         case STATE_LANDING:
+        // The target picker is reached mid-round, usually with a flight in the
+        // air. Blanking it would be the worst possible moment. [TF-10]
+        case STATE_TARGET_SET:
             return true;
         default:
             return false;
@@ -174,6 +200,14 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state == STATE_PREP)           return g_prepDispDs != _lastPrepDispDs;
     if (state == STATE_LANDING)        return g_landDispS  != _lastLandDispS;
     if (state == STATE_ALTITUDE_ENTRY) return g_altitudeM != _lastAltitudeM || g_altFlightNo != _lastAltFlightNo;
+    if (state == STATE_TARGET_SET) {
+        // The dialled value, and the running flight clock ticking beside it —
+        // the flight is usually in the air while this screen is up. Rendered on
+        // the same cadence as the running screen so the two agree.
+        if (g_pickMin != _lastPickMin || g_pickSec != _lastPickSec ||
+            g_pickWindow != _lastPickWindow || g_pickNone != _lastPickNone) return true;
+        return millis() >= _nextTimeMs;
+    }
     return false;
 }
 
@@ -211,10 +245,33 @@ static void _doRender(AppState state, int wtSecs) {
     // still only tracks whole seconds, so scale it up to the same units.
     int auxRemainDs = (state == STATE_LANDING) ? g_landDispS * 10 : g_prepDispDs;
     int auxTotalDs  = ((state == STATE_LANDING) ? g_landTotalS : g_prepTotalS) * 10;
+    // The middle label on the running screen. Precedence matters: the outcome
+    // flash beats the armed target, because the caller has just landed and needs
+    // to know whether the call stood before thinking about the next one. There is
+    // no outcome screen — it would have to be dismissed, and in a turn-around
+    // there is no room for that. [TF-10]/[TF-11]
+    static char  targetBuf[16];
+    const char*  targetNote     = nullptr;
+    int          targetNoteKind = TARGET_NOTE_ARMED;
+    if (millis() < g_targetMsgUntilMs) {
+        targetNote     = g_targetMsgHit ? "ACHIEVED" : "MISSED";
+        targetNoteKind = g_targetMsgHit ? TARGET_NOTE_ACHIEVED : TARGET_NOTE_MISSED;
+    } else if (g_targetS > TARGET_NONE_S && !g_ft.isRunning()) {
+        // Only when not flying: while airborne the big figure is already counting
+        // down to this target, so repeating it here would be noise.
+        snprintf(targetBuf, sizeof(targetBuf), "TGT %d:%02d",
+                 g_targetS / 60, g_targetS % 60);
+        targetNote     = targetBuf;
+        targetNoteKind = g_targetWindow ? TARGET_NOTE_WINDOW : TARGET_NOTE_ARMED;
+    }
+
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
                 battPct, charging, pilot, g_comms.baseConnState(), g_countdownN,
                 g_altitudeM, g_altFlightNo, g_log.count(), g_isF5K,
-                g_comms.getTimerId(), auxRemainDs, auxTotalDs, g_jumpedStart);
+                g_comms.getTimerId(), auxRemainDs, auxTotalDs, g_jumpedStart,
+                g_targetS, g_targetWindow,
+                g_pickMin, g_pickSec, g_pickWindow, g_pickNone,
+                targetNote, targetNoteKind);
     _lastState      = state;
     _lastWtSecs     = wtSecs;
     _lastWtMinutes  = g_wtMinutes;
@@ -227,6 +284,10 @@ static void _doRender(AppState state, int wtSecs) {
     _lastTimerId     = g_comms.getTimerId();
     _lastPrepDispDs  = g_prepDispDs;
     _lastLandDispS   = g_landDispS;
+    _lastPickMin     = g_pickMin;
+    _lastPickSec     = g_pickSec;
+    _lastPickWindow  = g_pickWindow;
+    _lastPickNone    = g_pickNone;
     unsigned long now = millis();
     _nextScratchMs = now + 50;
     _nextFlashMs   = now + ARC_SWEEP_INTERVAL_MS;
@@ -296,6 +357,15 @@ static void _startRound(bool withFlight, bool preserveFlight = false) {
     if (!preserveFlight) g_ft.reset();
     g_altFlightNo = 0;
     g_altitudeM   = 0;
+    // Arm the target for the new round. A ladder starts on rung 1 and the pilot
+    // must know it before they throw; Poker starts with nothing declared.
+    // ⚠ A timer assigned to a pilot late also starts on rung 1 (Kris) — it falls
+    // out of this, because a late timer runs _startRound() like any other. [TF-02]
+    g_targetsScored = 0;
+    g_windowUsed    = false;
+    g_targetWindow  = false;
+    g_targetS       = (g_comms.getTargetMode() == TARGET_LADDER)
+                          ? g_comms.getLadderStartS() : TARGET_NONE_S;
     g_history.startRound(g_isF5K, g_selectedPilotName);
     if (withFlight) {
         if (!preserveFlight) g_ft.start();
@@ -308,9 +378,95 @@ static void _startRound(bool withFlight, bool preserveFlight = false) {
 // Helper: stop the running flight and record it. A jumped start (launched before
 // the WT long beep) is logged but immediately scratched — invalid flight — and is
 // NOT sent to the base station or NVS round history.
+// May the timekeeper declare a target right now? Poker only, and only when none
+// is armed — FAI: a call that was not reached "cannot be changed", so an armed
+// target is not up for revision until it has been flown. [TF-10]
+static bool _pokerCanDeclare() {
+    return g_comms.getTargetMode() == TARGET_POKER && g_targetS <= TARGET_NONE_S;
+}
+
+static void _openTargetPicker(AppState returnTo) {
+    g_pickReturnState = returnTo;
+    g_pickNone        = true;      // start on "---" so a stray press changes nothing
+    g_pickWindow      = false;
+    g_pickMin         = 0;
+    g_pickSec         = 0;
+    g_state           = STATE_TARGET_SET;
+}
+
+static void _confirmTargetPicker() {
+    if (g_pickNone) {
+        // "---" is the escape: there is no L-hold to spare for a cancel.
+        Serial.println("[MAIN] Target picker cancelled");
+    } else if (g_pickWindow) {
+        // W resolves to a real number of seconds NOW, so a concrete time reaches
+        // the timekeeper, the scoring and the GliderScore export. The rulebook
+        // has the helper write the letter; the score is still a time.
+        const int rem = g_wt.getRemaining();
+        if (g_windowUsed) {
+            Serial.println("[MAIN] W refused — already used this round, one attempt only");
+        } else if (rem <= 0) {
+            Serial.println("[MAIN] W refused — no working time left to call");
+        } else {
+            g_targetS      = rem;
+            g_targetWindow = true;
+            g_windowUsed   = true;
+            Serial.printf("[MAIN] Target declared: W (%ds remaining)\n", rem);
+        }
+    } else {
+        g_targetS      = g_pickMin * 60 + g_pickSec;
+        g_targetWindow = false;
+        Serial.printf("[MAIN] Target declared: %d:%02d\n", g_pickMin, g_pickSec);
+    }
+    g_state = g_pickReturnState;
+}
+
+// Judge a target flight the instant it lands, and re-arm or advance. There is
+// deliberately NO confirmation screen: the timer knows both numbers so the answer
+// is not in doubt, and a screen to dismiss is exactly wrong in a turn-around.
+// The result is flashed on the working-time screen instead. [TF-10]/[TF-11]
+//
+// Judged strictly — achieved iff flown >= target, as FAI says ("reached or
+// exceeded"). No tolerance: the picker reaches every second, so any legal call
+// can be entered exactly, and a tolerance would only ever inflate the score.
+static void _judgeTarget(unsigned long durMs) {
+    if (g_targetS <= TARGET_NONE_S) return;
+
+    const bool hit = ((int)(durMs / 1000UL) >= g_targetS);
+    g_targetMsgHit     = hit;
+    g_targetMsgUntilMs = millis() + 3000;
+    Serial.printf("[MAIN] Target %ds%s vs flight %.1fs -> %s\n",
+                  g_targetS, g_targetWindow ? " (W)" : "",
+                  durMs / 1000.0f, hit ? "ACHIEVED" : "MISSED");
+
+    if (!hit) {
+        // FAI: a missed call "cannot be changed" — the same target stays armed and
+        // is re-flown. ⚠ Except a W, which gets ONLY ONE attempt.
+        if (g_targetWindow) {
+            g_targetS      = TARGET_NONE_S;
+            g_targetWindow = false;
+            Serial.println("[MAIN] W missed — no re-fly, one attempt only");
+        }
+        return;
+    }
+
+    g_targetsScored++;
+    if (g_comms.getTargetMode() == TARGET_LADDER) {
+        // "+0:15 when reached" — advance only on success, so a miss repeats the
+        // rung. That is what makes it a ladder rather than a sequence.
+        g_targetS      = g_targetS + g_comms.getLadderStepS();
+        g_targetWindow = false;
+    } else {
+        // Poker: the next call is the pilot's to make.
+        g_targetS      = TARGET_NONE_S;
+        g_targetWindow = false;
+    }
+}
+
 static void _recordFlight() {
     unsigned long dur = g_ft.stop();
     g_log.addFlight(dur);
+    if (!g_jumpedStart) _judgeTarget(dur);   // a jumped start never had a target
     if (g_jumpedStart) {
         // Deliberately no sendScratch() here, unlike the manual scratch: a jumped
         // start is never sent as a FLIGHT in the first place (JUMPED goes instead,
@@ -573,7 +729,15 @@ void loop() {
                 g_ft.start();
                 g_state = STATE_FLIGHT_RUNNING;
             } else if (btnL) {
-                if (g_log.count() > 0) {
+                // In Poker, L declares the next target instead of scratching.
+                // Kris: "no need for scratch for Poker as you do not move on from
+                // the time the pilot sets until they achieve it" — a bad flight
+                // simply gets re-flown against the same call, so there is nothing
+                // to discard. Ladder keeps scratch: its target is not the pilot's
+                // to set, so L has nothing else to do. [TF-10]
+                if (_pokerCanDeclare()) {
+                    _openTargetPicker(STATE_WORKING_TIME_RUNNING);
+                } else if (g_log.count() > 0) {
                     // L click: scratch last flight (if any recorded)
                     g_scratchStartMs = millis();
                     g_state = STATE_SCRATCH_CONFIRM;
@@ -601,8 +765,43 @@ void loop() {
                 // R click: stop flight and record time
                 _recordFlight();
                 g_state = STATE_WORKING_TIME_RUNNING;
+            } else if (btnL && _pokerCanDeclare()) {
+                // Declaring AFTER the launch is explicitly permitted — FAI 2025
+                // F3K.11.5: "shown to the timekeeper in written numbers (e.g.
+                // 2:38) ... immediately after the launch". This is the quick
+                // turn-around: throw first, call the target while it climbs.
+                _openTargetPicker(STATE_FLIGHT_RUNNING);
             }
             break;
+
+        case STATE_TARGET_SET: {
+            const int maxMin = g_wtMinutes > 0 ? g_wtMinutes : 10;
+            if (btnL) {
+                // Cycle the minutes: --- -> 0 -> 1 -> ... -> max -> W -> ---
+                // W and "---" live in this wrap because there is no L-hold to
+                // spare for either: holding L is an AXP2101 power-off that
+                // software never sees.
+                if (g_pickNone)                    { g_pickNone = false; g_pickMin = 0; g_pickSec = 0; }
+                else if (g_pickWindow)             { g_pickWindow = false; g_pickNone = true; }
+                else if (g_pickMin >= maxMin)      { g_pickWindow = true; }
+                else                               { g_pickMin++; }
+            } else if (btnR_veryLong) {
+                if (!g_pickNone && !g_pickWindow) {
+                    // Fine adjust. The rulebook's own example call is 2:38, so a
+                    // 5-second-only picker could not express a legal target — and
+                    // judging strictly against a number the timekeeper cannot
+                    // enter would punish the pilot for our UI.
+                    g_pickSec = (g_pickSec + TARGET_PICK_FINE_S) % 60;
+                }
+            } else if (btnR) {
+                if (!g_pickNone && !g_pickWindow) {
+                    g_pickSec = (g_pickSec + TARGET_PICK_SEC_STEP) % 60;
+                }
+            } else if (btnR_held) {
+                _confirmTargetPicker();
+            }
+            break;
+        }
 
         case STATE_ALTITUDE_ENTRY: {
             if (btnR_held) {

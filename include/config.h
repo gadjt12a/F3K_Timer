@@ -94,8 +94,29 @@ enum AppState : uint8_t {
     STATE_ALTITUDE_ENTRY,       // F5K only: enter altitude (m) after each flight
     STATE_HISTORY,              // browse last HIST_SLOTS rounds from NVS
     STATE_PREP,                 // base sent PREP t=N: yellow prep-time countdown to WT start
-    STATE_LANDING               // base sent LAND t=N: landing-window countdown after WT end
+    STATE_LANDING,              // base sent LAND t=N: landing-window countdown after WT end
+    STATE_TARGET_SET            // Poker: declare the target time (may be during a flight)
 };
+
+// ── Target tasks (Poker / Ladder) ────────────────────────────────────────────
+// A target of TARGET_WINDOW_S means "the rest of the working time" — the Poker
+// "end of working time" call, which the rulebook writes as W. It is resolved to a
+// real number of seconds the instant it is confirmed, so a concrete time reaches
+// the timekeeper, the scoring and the GliderScore export.
+//
+// ⚠ FAI 2025 F3K.11.5: a W call has ONLY ONE attempt, the single exception to
+// re-flying a missed target until it is achieved.
+#define TARGET_WINDOW_S      (-1)   // sentinel while picking; never stored as a target
+#define TARGET_NONE_S          0    // no target declared
+#define TARGET_PICK_SEC_STEP   5    // R click
+#define TARGET_PICK_FINE_S     1    // R very-long: reach every second, so 2:38 is enterable
+
+// What the running screen's middle label is saying, so main.cpp can choose the
+// message without knowing anything about display colours.
+#define TARGET_NOTE_ARMED      0    // "TGT 1:30" — what this throw is for
+#define TARGET_NOTE_ACHIEVED   1
+#define TARGET_NOTE_MISSED     2
+#define TARGET_NOTE_WINDOW     3    // an armed W call
 
 // ── Prep countdown (base-station driven) ─────────────────────────────────────
 #define PREP_UNLOCK_S        2     // R button unlocks this many s before WT start

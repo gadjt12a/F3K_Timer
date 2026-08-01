@@ -470,9 +470,23 @@ void UI::render(AppState       state,
                 int                timerId,
                 int                auxRemainDs,
                 int                auxTotalDs,
-                bool               jumpedStart)
+                bool               jumpedStart,
+                int                targetS,
+                bool               targetWindow,
+                int                pickMin,
+                int                pickSec,
+                bool               pickWindow,
+                bool               pickNone,
+                const char*        targetNote,
+                int                targetNoteKind)
 {
+    _targetNote     = targetNote;
+    _targetNoteKind = targetNoteKind;
     _jumped = jumpedStart;  // running screen shows JUMPED instead of FLYING
+    // Held so every flight-time draw path counts down to the same target without
+    // each one needing it threaded through. [TF-10]/[TF-11]
+    _targetS      = targetS;
+    _targetWindow = targetWindow;
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
     bool isRunning     = (state == STATE_WORKING_TIME_RUNNING || state == STATE_FLIGHT_RUNNING);
@@ -573,6 +587,15 @@ void UI::render(AppState       state,
             if (!screenChanged) _clearScreen();
             _drawAltitudeEntry(altitudeM, altFlightNo, altTotalFlights);
             _prevAltFlightNo = altFlightNo;
+            break;
+
+        case STATE_TARGET_SET:
+            // Full redraw every time, like altitude entry: the value changes shape
+            // between "---", "W" and "M:SS", so an incremental clear region cannot
+            // be right for all three. [TF-10]
+            if (!screenChanged) _clearScreen();
+            _drawTargetPicker(pickMin, pickSec, pickWindow, pickNone,
+                              ft.isRunning() ? ft.elapsed() : 0);
             break;
 
         case STATE_COUNTDOWN: {
@@ -776,8 +799,8 @@ void UI::_drawRunningFull(bool flightActive,
     _drawCentered(fmtMs(remMs, buf, sizeof(buf)), DISPLAY_CX, Y_WT_DIGITS, col, 3);
 
     unsigned long el = ft.elapsed();
-    col = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
-    _drawCentered(fmtMs(el, buf, sizeof(buf)), DISPLAY_CX, Y_FL_DIGITS, col, 2);
+    col = _flightShowCol(el, flightActive);
+    _drawCentered(fmtMs(_flightShowMs(el), buf, sizeof(buf)), DISPLAY_CX, Y_FL_DIGITS, col, 2);
 
     _drawFlightLog(log);
 #else
@@ -785,12 +808,12 @@ void UI::_drawRunningFull(bool flightActive,
     _drawFontCentered("FLIGHT TIME", WS_CX, WS_Y_FL_LABEL, COL_GRAY, &FreeSans12pt7b);
 
     unsigned long el = ft.elapsed();
-    uint16_t flCol = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
-    _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, flCol, &FreeMonoBold24pt7b);
+    uint16_t flCol = _flightShowCol(el, flightActive);
+    _drawFontCentered(fmtMs(_flightShowMs(el), buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, flCol, &FreeMonoBold24pt7b);
 
     // State indicator (FLYING/JUMPED/WAIT) in middle
-    _drawFontCentered(flightActive ? (_jumped ? "JUMPED" : "FLYING") : "WAIT", WS_CX, WS_Y_STATE,
-                      flightActive ? (_jumped ? COL_RED : COL_GREEN) : COL_GRAY,
+    _drawFontCentered(_stateLabel(flightActive), WS_CX, WS_Y_STATE,
+                      _stateLabelCol(flightActive),
                       &FreeSansBold18pt7b);
 
     // Flight log (3 best times) in middle
@@ -843,9 +866,9 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
 
     // Update flight time
     unsigned long el = ft.elapsed();
-    uint16_t col = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
+    uint16_t col = _flightShowCol(el, flightActive);
     _tft.fillRect(DISPLAY_CX - 50, Y_FL_DIGITS - 12, 100, 30, COL_BG);
-    _drawCentered(fmtMs(el, buf, sizeof(buf)), DISPLAY_CX, Y_FL_DIGITS, col, 3);
+    _drawCentered(fmtMs(_flightShowMs(el), buf, sizeof(buf)), DISPLAY_CX, Y_FL_DIGITS, col, 3);
 
     // Redraw flight log (new flight may have been recorded)
     _tft.fillRect(DISPLAY_CX - 80, Y_LOG_START - 5, 160, Y_LOG_STEP * 3 + 10, COL_BG);
@@ -857,14 +880,14 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
 
     // Update flight time (large) at top
     unsigned long el = ft.elapsed();
-    uint16_t col = flightActive ? COL_GREEN : (el > 0 ? COL_WHITE : COL_DIMGRAY);
+    uint16_t col = _flightShowCol(el, flightActive);
     _gfx->fillRect(WS_CX - 120, WS_Y_FL_DIGITS - 35, 240, 70, COL_BG);
-    _drawFontCentered(fmtMs(el, buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, col, &FreeMonoBold24pt7b);
+    _drawFontCentered(fmtMs(_flightShowMs(el), buf, sizeof(buf)), WS_CX, WS_Y_FL_DIGITS, col, &FreeMonoBold24pt7b);
 
     // Update state label (FLYING/JUMPED/WAIT) — only changes when flight state changes
     _gfx->fillRect(WS_CX - 100, WS_Y_STATE - 25, 200, 50, COL_BG);
-    _drawFontCentered(flightActive ? (_jumped ? "JUMPED" : "FLYING") : "WAIT", WS_CX, WS_Y_STATE,
-                      flightActive ? (_jumped ? COL_RED : COL_GREEN) : COL_GRAY,
+    _drawFontCentered(_stateLabel(flightActive), WS_CX, WS_Y_STATE,
+                      _stateLabelCol(flightActive),
                       &FreeSansBold18pt7b);
 
     // Redraw flight log (new flight may have been recorded)
@@ -990,6 +1013,76 @@ void UI::_drawAltitudeEntry(int altM, int flightNo, int totalFlights) {
     _drawFontCentered("m",                     WS_CX, 300, COL_GRAY,      &FreeSansBold18pt7b);
     _drawFontCentered("L = +10m   R = +1m",    WS_CX, 370, COL_WHITE,     &FreeSans12pt7b);
     _drawFontCentered("HOLD R = CONFIRM",      WS_CX, 408, COL_DIMGRAY,   &FreeSans9pt7b);
+#endif
+}
+
+const char* UI::_stateLabel(bool flightActive) const {
+    if (_targetNote) return _targetNote;
+    return flightActive ? (_jumped ? "JUMPED" : "FLYING") : "WAIT";
+}
+
+uint16_t UI::_stateLabelCol(bool flightActive) const {
+    if (_targetNote) {
+        switch (_targetNoteKind) {
+            case TARGET_NOTE_ACHIEVED: return COL_ARC_GREEN;
+            case TARGET_NOTE_MISSED:   return COL_RED;
+            case TARGET_NOTE_WINDOW:   return COL_ORANGE;
+            default:                   return COL_YELLOW;
+        }
+    }
+    return flightActive ? (_jumped ? COL_RED : COL_GREEN) : COL_GRAY;
+}
+
+unsigned long UI::_flightShowMs(unsigned long elapsedMs) const {
+    if (_targetS <= 0) return elapsedMs;
+    const unsigned long target = (unsigned long)_targetS * 1000UL;
+    return (elapsedMs >= target) ? (elapsedMs - target) : (target - elapsedMs);
+}
+
+uint16_t UI::_flightShowCol(unsigned long elapsedMs, bool flightActive) const {
+    if (!flightActive) return elapsedMs > 0 ? COL_WHITE : COL_DIMGRAY;
+    if (_targetS <= 0) return COL_GREEN;
+    // Orange past the target: the call is banked and this is overtime, which is
+    // wasted airtime in Poker. Distinguishable at a glance from counting down.
+    return (elapsedMs >= (unsigned long)_targetS * 1000UL) ? COL_ORANGE : COL_GREEN;
+}
+
+void UI::_drawTargetPicker(int mins, int secs, bool isWindow, bool isNone,
+                           unsigned long flightMs) {
+    char valBuf[12], ftBuf[20];
+    if (isNone)        snprintf(valBuf, sizeof(valBuf), "---");
+    else if (isWindow) snprintf(valBuf, sizeof(valBuf), "W");
+    else               snprintf(valBuf, sizeof(valBuf), "%d:%02d", mins, secs);
+
+    // The running flight, shown because declaring AFTER the launch is explicitly
+    // permitted (FAI 2025 F3K.11.5) and is the quick turn-around case. Kris:
+    // "you need to show the active FT if it is running (sanity for the timer)".
+    const bool flying = flightMs > 0;
+    if (flying) {
+        unsigned long t = flightMs / 100;    // tenths
+        snprintf(ftBuf, sizeof(ftBuf), "FLYING %lu:%02lu.%lu",
+                 t / 600, (t / 10) % 60, t % 10);
+    } else {
+        snprintf(ftBuf, sizeof(ftBuf), "NOT LAUNCHED");
+    }
+
+#ifdef WOKWI_SIM
+    _drawCentered("CALL TARGET",  DISPLAY_CX, 35,  COL_YELLOW, 1);
+    _drawCentered(ftBuf,          DISPLAY_CX, 60,  flying ? COL_GREEN : COL_GRAY, 1);
+    _drawCentered(valBuf,         DISPLAY_CX, 150, COL_WHITE,  5);
+    _drawCentered("L=MIN  R=+5s", DISPLAY_CX, 235, COL_WHITE,  1);
+    _drawCentered("HOLD R = OK",  DISPLAY_CX, 258, COL_GRAY,   1);
+#else
+    _drawFontCentered("CALL TARGET",          WS_CX, 75,  COL_ORANGE, &FreeSans12pt7b);
+    _drawFontCentered(ftBuf,                  WS_CX, 120,
+                      flying ? COL_ARC_GREEN : COL_GRAY,             &FreeSans9pt7b);
+    _drawFontCentered(valBuf,                 WS_CX, 245, COL_WHITE,  &FreeMonoBold24pt7b);
+    _drawFontCentered("L = MIN    R = +5s",   WS_CX, 340, COL_WHITE,  &FreeSans12pt7b);
+    _drawFontCentered("HOLD R = OK",          WS_CX, 378, COL_DIMGRAY, &FreeSans9pt7b);
+    // The two ends of the minute wrap, spelled out — neither is guessable, and
+    // there is no L-hold to give either its own gesture.
+    _drawFontCentered("--- = no call    W = rest of window",
+                                              WS_CX, 408, COL_DIMGRAY, &FreeSans9pt7b);
 #endif
 }
 
