@@ -349,6 +349,26 @@ void TimerComms::_parseLine(const char* line) {
         if (const char* v = strstr(line, "step="))    _ladderStepS  = atoi(v + 5);
         if (const char* v = strstr(line, "targets=")) _pokerTargets = atoi(v + 8);
 
+        // `rungs=60,90,120,150,180` — an explicit ladder. Cleared every TASK so a
+        // stepped ladder arriving after an explicit one does not inherit its rungs.
+        // ⚠ Deliberately NOT `targets=`: that already carries Poker's target COUNT,
+        // and one key cannot be a count in one mode and a list in another.
+        _ladderRungCount = 0;
+        if (const char* v = strstr(line, "rungs=")) {
+            // Walk digits to the end of the parameter. Written this way rather than
+            // hunting commas because `rungs=` may be the last param on the line,
+            // with no trailing separator to find.
+            const char* p = v + 6;
+            while (*p && *p != ' ' && _ladderRungCount < MAX_LADDER_RUNGS) {
+                if (*p >= '0' && *p <= '9') {
+                    _ladderRungs[_ladderRungCount++] = atoi(p);
+                    while (*p >= '0' && *p <= '9') p++;
+                } else {
+                    p++;                       // comma or stray separator
+                }
+            }
+        }
+
         _hasTaskUpdate = true;
         Serial.printf("[COMMS] Task update: WT=%ds disc=%s task=%s mode=%d\n",
                       _taskWtSeconds, _isF5K ? "F5K" : "F3K",

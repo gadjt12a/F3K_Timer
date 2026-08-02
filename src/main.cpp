@@ -393,7 +393,10 @@ static void _startRound(bool withFlight, bool preserveFlight = false) {
     // out of this, because a late timer runs _startRound() like any other. [TF-02]
     g_targetsScored = 0;
     if (g_comms.getTargetMode() == TARGET_LADDER) {
-        g_targetS             = g_comms.getLadderStartS();
+        // Rung 1: the first of an explicit list (K, M) or the stepped start (D).
+        g_targetS             = g_comms.getLadderRungCount() > 0
+                                    ? g_comms.getLadderRungS(0)
+                                    : g_comms.getLadderStartS();
         g_targetWindow        = false;
         g_targetWindowPending = false;
         g_windowUsed          = false;
@@ -576,9 +579,17 @@ static void _judgeTarget(unsigned long durMs) {
 
     g_targetsScored++;
     if (g_comms.getTargetMode() == TARGET_LADDER) {
-        // "+0:15 when reached" — advance only on success, so a miss repeats the
-        // rung. That is what makes it a ladder rather than a sequence.
-        g_targetS      = g_targetS + g_comms.getLadderStepS();
+        // Advance only on success, so a miss repeats the rung. That is what makes
+        // it a ladder rather than a sequence, and it is true of all three: D climbs
+        // by a step forever, K and M walk an explicit list and end when it runs out.
+        if (g_comms.getLadderRungCount() > 0) {
+            const int next = g_comms.getLadderRungS(g_targetsScored);
+            g_targetS = (next > 0) ? next : TARGET_NONE_S;   // 0 = ladder finished
+            if (g_targetS == TARGET_NONE_S)
+                Serial.println("[MAIN] Ladder complete — all rungs reached");
+        } else {
+            g_targetS = g_targetS + g_comms.getLadderStepS();
+        }
         g_targetWindow = false;
     } else {
         // Poker: the next call is the pilot's to make.

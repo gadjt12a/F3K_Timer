@@ -37,6 +37,15 @@ public:
     TargetMode  getTargetMode()   const { return _targetMode; }
     int         getLadderStartS() const { return _ladderStartS; }
     int         getLadderStepS()  const { return _ladderStepS; }
+    // An explicit rung list (F3K K "Big Ladder" 1:00/1:30/2:00/2:30/3:00, M "Huge
+    // Ladder" 3:00/5:00/7:00). Empty means the ladder climbs by getLadderStepS()
+    // instead, which is task D and has no last rung. Both advance ONLY when the
+    // rung is reached — that is what makes them ladders. [TF-11]
+    int         getLadderRungCount() const { return _ladderRungCount; }
+    // Seconds for rung `i`, or 0 when past the end of an explicit list.
+    int         getLadderRungS(int i) const {
+        return (i >= 0 && i < _ladderRungCount) ? _ladderRungs[i] : 0;
+    }
     int         getPokerTargets() const { return _pokerTargets; }
     const char* getTaskCode()     const { return _taskCode; }
     int  getTimerId()       const { return _timerId; }
@@ -99,6 +108,9 @@ private:
     TargetMode _targetMode = TARGET_PLAIN;
     int  _ladderStartS    = 30;
     int  _ladderStepS     = 15;
+    static const int MAX_LADDER_RUNGS = 8;   // K has 5, M has 3
+    int  _ladderRungs[MAX_LADDER_RUNGS] = {0};
+    int  _ladderRungCount = 0;
     int  _pokerTargets    = 3;
     char _taskCode[8]     = "";
     int  _countdownN      = 0;
