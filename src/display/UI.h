@@ -138,6 +138,11 @@ private:
     bool _targetWindow = false;  // that target was a W call
     const char* _targetNote     = nullptr;
     int         _targetNoteKind = TARGET_NOTE_ARMED;
+    // "FLYING (3)" — which launch this is, so the timekeeper can see at a glance
+    // how many the pilot has used on a launch-limited task without counting the
+    // log. Built into a buffer because _stateLabel() returns a const char*.
+    int         _launchNo = 0;
+    mutable char _stateLabelBuf[16] = {0};
 
     // The middle label. Normally FLYING/JUMPED/WAIT; a target note takes
     // precedence, because "TGT 0:45" or "ACHIEVED" is what the caller needs in

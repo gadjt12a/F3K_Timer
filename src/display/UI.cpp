@@ -487,6 +487,8 @@ void UI::render(AppState       state,
     // each one needing it threaded through. [TF-10]/[TF-11]
     _targetS      = targetS;
     _targetWindow = targetWindow;
+    // The launch in progress is the next one after everything already recorded.
+    _launchNo     = log.count() + 1;
     // Treat WORKING_TIME_RUNNING and FLIGHT_RUNNING as the same screen for continuity
     // (arc should NOT reset when starting/stopping a flight)
     bool isRunning     = (state == STATE_WORKING_TIME_RUNNING || state == STATE_FLIGHT_RUNNING);
@@ -837,19 +839,26 @@ void UI::_updateRunningInc(bool flightActive,
     char buf[16];
     uint16_t col = (remS <= ARC_RED_THRESHOLD) ? COL_RED : COL_WHITE;
 
+    // ⚠ This is the ONLY path that redraws the flight clock while a glider is in
+    // the air (every 50 ms), so it must count down to the target exactly like the
+    // full-redraw paths. Drawing `ft.elapsed()` raw here is what made the Poker
+    // countdown invisible on hardware even though _flightShowMs() was correct.
+    unsigned long el = ft.elapsed();
+
 #ifdef WOKWI_SIM
     _drawCentered(fmtMs(remMs, buf, sizeof(buf)), DISPLAY_CX, Y_WT_DIGITS, col, 3);
     if (flightActive) {
-        _drawCentered(fmtMs(ft.elapsed(), buf, sizeof(buf)),
-                      DISPLAY_CX, Y_FL_DIGITS, COL_GREEN, 2);
+        _drawCentered(fmtMs(_flightShowMs(el), buf, sizeof(buf)),
+                      DISPLAY_CX, Y_FL_DIGITS, _flightShowCol(el, flightActive), 2);
     }
 #else
     // Update working time at bottom
     _drawFontCentered(fmtMs(remMs, buf, sizeof(buf)), WS_CX, WS_Y_WT_DIGITS, col, &FreeMonoBold18pt7b);
     // Update flight time at top if active
     if (flightActive) {
-        _drawFontCentered(fmtMs(ft.elapsed(), buf, sizeof(buf)),
-                          WS_CX, WS_Y_FL_DIGITS, COL_GREEN, &FreeMonoBold24pt7b);
+        _drawFontCentered(fmtMs(_flightShowMs(el), buf, sizeof(buf)),
+                          WS_CX, WS_Y_FL_DIGITS, _flightShowCol(el, flightActive),
+                          &FreeMonoBold24pt7b);
     }
 #endif
 }
@@ -1018,7 +1027,14 @@ void UI::_drawAltitudeEntry(int altM, int flightNo, int totalFlights) {
 
 const char* UI::_stateLabel(bool flightActive) const {
     if (_targetNote) return _targetNote;
-    return flightActive ? (_jumped ? "JUMPED" : "FLYING") : "WAIT";
+    if (!flightActive) return "WAIT";
+    // The launch number rides with the label because that is the only line on the
+    // running screen the timekeeper is already watching, and on a launch-limited
+    // task (F3K F: six, F5K A: four, F5K B/D/E: three) it is what they need. A
+    // jumped start still consumes a launch, so it is numbered too. [I-46]/[I-49]
+    snprintf(_stateLabelBuf, sizeof(_stateLabelBuf), "%s (%d)",
+             _jumped ? "JUMPED" : "FLYING", _launchNo);
+    return _stateLabelBuf;
 }
 
 uint16_t UI::_stateLabelCol(bool flightActive) const {
@@ -1070,17 +1086,20 @@ void UI::_drawTargetPicker(int mins, int secs, bool isWindow, bool isNone,
     _drawCentered("CALL TARGET",  DISPLAY_CX, 35,  COL_YELLOW, 1);
     _drawCentered(ftBuf,          DISPLAY_CX, 60,  flying ? COL_GREEN : COL_GRAY, 1);
     _drawCentered(valBuf,         DISPLAY_CX, 150, COL_WHITE,  5);
-    _drawCentered("L=MIN  R=+5s", DISPLAY_CX, 235, COL_WHITE,  1);
-    _drawCentered("HOLD R = OK",  DISPLAY_CX, 258, COL_GRAY,   1);
+    _drawCentered("L=W/MIN R=+5s", DISPLAY_CX, 235, COL_WHITE, 1);
+    _drawCentered("HOLD R 2s = OK", DISPLAY_CX, 258, COL_GRAY, 1);
 #else
     _drawFontCentered("CALL TARGET",          WS_CX, 75,  COL_ORANGE, &FreeSans12pt7b);
     _drawFontCentered(ftBuf,                  WS_CX, 120,
                       flying ? COL_ARC_GREEN : COL_GRAY,             &FreeSans9pt7b);
     _drawFontCentered(valBuf,                 WS_CX, 245, COL_WHITE,  &FreeMonoBold24pt7b);
-    _drawFontCentered("L = MIN    R = +5s",   WS_CX, 340, COL_WHITE,  &FreeSans12pt7b);
-    _drawFontCentered("HOLD R = OK",          WS_CX, 378, COL_DIMGRAY, &FreeSans9pt7b);
-    // The two ends of the minute wrap, spelled out — neither is guessable, and
-    // there is no L-hold to give either its own gesture.
+    // Three R gestures, so they have to be spelled out. The long-press +1s exists
+    // only because the rulebook's own example call is 2:38.
+    _drawFontCentered("L = W / MIN    R = +5s", WS_CX, 340, COL_WHITE, &FreeSans12pt7b);
+    _drawFontCentered("R LONG = +1s     HOLD R 2s = OK",
+                                              WS_CX, 378, COL_DIMGRAY, &FreeSans9pt7b);
+    // The two ends of the wrap, spelled out — neither is guessable, and there is
+    // no L-hold to give either its own gesture.
     _drawFontCentered("--- = no call    W = rest of window",
                                               WS_CX, 408, COL_DIMGRAY, &FreeSans9pt7b);
 #endif

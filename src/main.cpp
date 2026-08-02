@@ -53,6 +53,18 @@ static int  g_pickSec       = 0;
 static bool g_pickWindow    = false;
 static bool g_pickNone      = true;           // the "---" position: confirm to clear
 static AppState g_pickReturnState = STATE_WORKING_TIME_RUNNING;
+static bool g_prepDeclared  = false;          // call made in prep; survives _startRound()
+// A W call that has been made but not yet thrown. ⚠ W must NOT resolve to a number
+// when it is confirmed: it means "I will still be flying when the window closes",
+// so the seconds it is worth are the seconds left at the LAUNCH, not at the call.
+// Resolving at confirm made a W unflyable unless the pilot threw instantly — the
+// clock kept running while they walked to the line and the target never moved.
+static bool g_targetWindowPending = false;
+// This flight was still in the air when the working window closed. That IS the W
+// call being achieved, and it is judged on the fact rather than on the arithmetic:
+// a flight recorded at expiry can land a few tens of ms short of its resolved
+// target and truncate to one second under it.
+static bool g_flightEndedByExpiry = false;
 // Outcome flash on the working-time screen, instead of a screen to dismiss —
 // there is no room for one in a turn-around.
 static unsigned long g_targetMsgUntilMs = 0;
@@ -173,7 +185,15 @@ static bool _benchMode() {
 // select, history and the (now timeout-free) OTA screen had the same hole.
 static bool _screenMaySleep(AppState s) {
     if (!_roundLive(s)) return true;
-    // On the bench, even a live round may blank: nobody is holding it.
+    // ⚠ A live round with the base station driving it is a REAL round, cable or
+    // not. The timer is wired to the Pi for development, so bench mode is true for
+    // every round we actually test — and the screen blanked mid-flight, which is
+    // the one moment it must not. Kris, watching it happen: "we can't have that."
+    //
+    // The AMOLED protection this weakens only mattered for an unattended simulated
+    // round, and a round the base station is running is by definition attended.
+    if (g_comms.isConnected()) return false;
+    // Standalone on the bench: nobody is holding it, so let it blank.
     return _benchMode();
 }
 
@@ -256,6 +276,14 @@ static void _doRender(AppState state, int wtSecs) {
     if (millis() < g_targetMsgUntilMs) {
         targetNote     = g_targetMsgHit ? "ACHIEVED" : "MISSED";
         targetNoteKind = g_targetMsgHit ? TARGET_NOTE_ACHIEVED : TARGET_NOTE_MISSED;
+    } else if (g_targetWindowPending) {
+        // Called but not yet thrown, so it has no number yet. Show what it is
+        // worth if they launch now — it shrinks as they walk to the line, which is
+        // exactly the thing the timekeeper needs to see.
+        const int rem = g_wt.getRemaining();
+        snprintf(targetBuf, sizeof(targetBuf), "TGT W %d:%02d", rem / 60, rem % 60);
+        targetNote     = targetBuf;
+        targetNoteKind = TARGET_NOTE_WINDOW;
     } else if (g_targetS > TARGET_NONE_S && !g_ft.isRunning()) {
         // Only when not flying: while airborne the big figure is already counting
         // down to this target, so repeating it here would be noise.
@@ -349,6 +377,8 @@ static void _selectPilot(int idx) {
 
 // Helper: start a round (shared between button and base station START command).
 // preserveFlight: a flight is already running (early launch during prep) — keep it.
+static void _resolveWindowTarget();   // defined below; needed by _startRound()
+
 static void _startRound(bool withFlight, bool preserveFlight = false) {
     g_wt.reset();
     g_wt.begin(g_wtMinutes * 60);
@@ -362,13 +392,33 @@ static void _startRound(bool withFlight, bool preserveFlight = false) {
     // ⚠ A timer assigned to a pilot late also starts on rung 1 (Kris) — it falls
     // out of this, because a late timer runs _startRound() like any other. [TF-02]
     g_targetsScored = 0;
-    g_windowUsed    = false;
-    g_targetWindow  = false;
-    g_targetS       = (g_comms.getTargetMode() == TARGET_LADDER)
-                          ? g_comms.getLadderStartS() : TARGET_NONE_S;
+    if (g_comms.getTargetMode() == TARGET_LADDER) {
+        g_targetS             = g_comms.getLadderStartS();
+        g_targetWindow        = false;
+        g_targetWindowPending = false;
+        g_windowUsed          = false;
+    } else if (g_prepDeclared && g_targetS > TARGET_NONE_S) {
+        // ⚠ A Poker call made during prep must survive the window opening. This
+        // reset used to clear it unconditionally, so declaring early — the whole
+        // point of allowing it in prep — silently threw the call away.
+        Serial.printf("[MAIN] Prep-declared target kept: %d:%02d\n",
+                      g_targetS / 60, g_targetS % 60);
+    } else if (g_prepDeclared && g_targetWindowPending) {
+        // A W called in prep, still waiting for the launch to give it a number.
+        // ⚠ g_windowUsed must survive with it, or the one-attempt rule is lost.
+        Serial.println("[MAIN] Prep-declared W kept, unresolved until launch");
+    } else {
+        g_targetS             = TARGET_NONE_S;
+        g_targetWindow        = false;
+        g_targetWindowPending = false;
+        g_windowUsed          = false;
+    }
+    g_prepDeclared  = false;
     g_history.startRound(g_isF5K, g_selectedPilotName);
     if (withFlight) {
         if (!preserveFlight) g_ft.start();
+        g_flightEndedByExpiry = false;
+        _resolveWindowTarget();   // the window has opened and the glider is away
         g_state = STATE_FLIGHT_RUNNING;
     } else {
         g_state = STATE_WORKING_TIME_RUNNING;
@@ -382,7 +432,56 @@ static void _startRound(bool withFlight, bool preserveFlight = false) {
 // is armed — FAI: a call that was not reached "cannot be changed", so an armed
 // target is not up for revision until it has been flown. [TF-10]
 static bool _pokerCanDeclare() {
-    return g_comms.getTargetMode() == TARGET_POKER && g_targetS <= TARGET_NONE_S;
+    return g_comms.getTargetMode() == TARGET_POKER && g_targetS <= TARGET_NONE_S &&
+           !g_targetWindowPending;   // a called-but-unthrown W is armed, not absent
+}
+
+// A W becomes a number the moment the glider leaves the hand: "the rest of the
+// working time" is measured from the launch. Called from every path that starts a
+// flight. No-op unless a W is waiting to be resolved.
+static void _resolveWindowTarget() {
+    if (!g_targetWindowPending) return;
+    g_targetWindowPending = false;
+    g_targetS      = g_wt.getRemaining();
+    g_targetWindow = true;
+    Serial.printf("[MAIN] W resolved at launch: %ds to the end of the window\n", g_targetS);
+}
+
+// The prep countdown, its beeps and the no-START fallback. Extracted because the
+// caller may be in the target picker when prep runs out: the clock must not stop
+// just because a different screen is up, or the beeps go silent and the window
+// never opens. Returns whole seconds remaining. ⚠ May start the round, so callers
+// must re-check g_state afterwards.
+static int _tickPrepClock() {
+    const unsigned long nowP = millis();
+    const long remMs = (long)(g_prepEndMs - nowP);
+    const int  remDs = (remMs > 0) ? (int)((remMs + 99) / 100) : 0;   // tenths, rounded up
+    const int  rem   = (remDs + 9) / 10;                              // whole seconds
+    g_prepDispDs = remDs;
+    // Beeps at 30, 15, 10..1; the long beep comes with START (window open)
+    if (rem != g_prepBeepS && rem > 0 && (rem == 30 || rem == 15 || rem <= 10)) {
+        g_tones.playAlert(rem);
+        g_prepBeepS = rem;
+    }
+    // Fallback: prep hit 0 but no START from base (packet loss) — start locally
+    if (rem == 0) {
+        if (g_prepZeroMs == 0) {
+            g_prepZeroMs = nowP;
+        } else if (nowP - g_prepZeroMs >= PREP_START_GRACE_MS) {
+            Serial.println("[MAIN] No START after prep end — starting round locally");
+            g_tones.playWindowOpen();
+            _startRound(g_earlyFlight, g_earlyFlight);
+            g_earlyFlight = false;
+        }
+    }
+    return rem;
+}
+
+// The picker is up, but prep is what is really running underneath it. Everything
+// that drives prep — the COUNT re-sync, START, the local clock — has to keep
+// treating this as prep or the round opens with a frozen screen behind a picker.
+static bool _pickingFromPrep() {
+    return g_state == STATE_TARGET_SET && g_pickReturnState == STATE_PREP;
 }
 
 static void _openTargetPicker(AppState returnTo) {
@@ -402,22 +501,42 @@ static void _confirmTargetPicker() {
         // W resolves to a real number of seconds NOW, so a concrete time reaches
         // the timekeeper, the scoring and the GliderScore export. The rulebook
         // has the helper write the letter; the score is still a time.
-        const int rem = g_wt.getRemaining();
+        //
+        // ⚠ In prep the working clock has not started, so getRemaining() is not
+        // the answer — it would read zero and refuse a perfectly legal call. The
+        // rest of a window that has not opened is the whole window.
+        const int rem = (g_pickReturnState == STATE_PREP) ? g_wtMinutes * 60
+                                                          : g_wt.getRemaining();
         if (g_windowUsed) {
             Serial.println("[MAIN] W refused — already used this round, one attempt only");
         } else if (rem <= 0) {
             Serial.println("[MAIN] W refused — no working time left to call");
         } else {
-            g_targetS      = rem;
-            g_targetWindow = true;
-            g_windowUsed   = true;
-            Serial.printf("[MAIN] Target declared: W (%ds remaining)\n", rem);
+            // Armed, deliberately NOT resolved — see g_targetWindowPending. If the
+            // glider is already in the air, the launch has happened and there is
+            // nothing left to wait for, so resolve against the clock right now.
+            g_windowUsed          = true;
+            g_targetWindowPending = true;
+            if (g_ft.isRunning()) {
+                _resolveWindowTarget();
+            } else {
+                Serial.printf("[MAIN] Target declared: W (%ds now; resolves at launch)\n", rem);
+            }
         }
+    } else if (g_pickMin == 0 && g_pickSec == 0) {
+        // 0:00 is indistinguishable from TARGET_NONE_S once stored, so confirming
+        // it would look like a declared call and behave like no call at all. It is
+        // also not a legal target. Treated as the escape, and said out loud.
+        Serial.println("[MAIN] Target picker cancelled — 0:00 is not a call");
     } else {
         g_targetS      = g_pickMin * 60 + g_pickSec;
         g_targetWindow = false;
         Serial.printf("[MAIN] Target declared: %d:%02d\n", g_pickMin, g_pickSec);
     }
+    // Remember that this call was made before the window opened, so _startRound()
+    // knows not to clear it when START lands a moment later.
+    g_prepDeclared = (g_pickReturnState == STATE_PREP &&
+                      (g_targetS > TARGET_NONE_S || g_targetWindowPending));
     g_state = g_pickReturnState;
 }
 
@@ -432,7 +551,12 @@ static void _confirmTargetPicker() {
 static void _judgeTarget(unsigned long durMs) {
     if (g_targetS <= TARGET_NONE_S) return;
 
-    const bool hit = ((int)(durMs / 1000UL) >= g_targetS);
+    // ⚠ A W is achieved by still flying when the window shuts, not by arithmetic.
+    // Its resolved target is the time left at the launch, so a flight ended by
+    // expiry lands within milliseconds of it and truncating seconds can put it one
+    // under — failing the only call it is possible to fly perfectly.
+    const bool hit = (g_targetWindow && g_flightEndedByExpiry) ||
+                     ((int)(durMs / 1000UL) >= g_targetS);
     g_targetMsgHit     = hit;
     g_targetMsgUntilMs = millis() + 3000;
     Serial.printf("[MAIN] Target %ds%s vs flight %.1fs -> %s\n",
@@ -567,7 +691,7 @@ void loop() {
 
     if (g_comms.hasCountdown()) {
         int n = g_comms.getCountdownN();
-        if (g_state == STATE_PREP) {
+        if (g_state == STATE_PREP || _pickingFromPrep()) {
             // Base tick for the last 10s — re-sync the local prep clock to it
             g_prepEndMs = millis() + (unsigned long)n * 1000UL;
         } else if (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT ||
@@ -581,8 +705,12 @@ void loop() {
 
     if (g_comms.hasStartCommand() &&
         (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT ||
-         g_state == STATE_COUNTDOWN || g_state == STATE_PREP)) {
-        if (g_state == STATE_COUNTDOWN || g_state == STATE_PREP) g_tones.playWindowOpen();
+         g_state == STATE_COUNTDOWN || g_state == STATE_PREP ||
+         _pickingFromPrep())) {
+        // ⚠ _pickingFromPrep() must be here: without it a caller still holding the
+        // picker open when the window opened would never start the round at all.
+        // An unconfirmed call is abandoned — the window is open, that outranks it.
+        if (g_state != STATE_IDLE && g_state != STATE_PILOT_SELECT) g_tones.playWindowOpen();
         // An early launch during prep (last 2s) keeps its running flight timer
         _startRound(g_earlyFlight, g_earlyFlight);
         g_earlyFlight = false;
@@ -625,6 +753,7 @@ void loop() {
     const bool btnR          = g_btns.btnBClicked();   // R click
     const bool btnR_held     = g_btns.btnBHeld();      // R hold (800ms)
     const bool btnR_veryLong = g_btns.btnBVeryLong();  // R very long (2s) - abort
+    const bool btnR_longClick = g_btns.btnBLongClicked(); // R 800-2000ms, on release
     const bool btnL          = g_btns.btnAClicked();   // L click
     // Note: L hold triggers AXP2101 power-off, not used in software
 
@@ -669,17 +798,8 @@ void loop() {
             break;
 
         case STATE_PREP: {
-            unsigned long nowP = millis();
-            long remMs = (long)(g_prepEndMs - nowP);
-            int  remDs = (remMs > 0) ? (int)((remMs + 99) / 100) : 0;   // tenths, rounded up
-            int  rem   = (remDs + 9) / 10;                              // whole seconds
-            g_prepDispDs = remDs;
-            // Beeps at 30, 15, 10..1; the long beep comes with START (window open)
-            if (rem != g_prepBeepS && rem > 0 &&
-                (rem == 30 || rem == 15 || rem <= 10)) {
-                g_tones.playAlert(rem);
-                g_prepBeepS = rem;
-            }
+            const int rem = _tickPrepClock();
+            if (g_state != STATE_PREP) break;   // the fallback start fired
             // R unlocks for the final PREP_UNLOCK_S seconds. Launching before the
             // WT long beep is a jumped start — the flight runs but is invalidated
             // when stopped.
@@ -699,16 +819,12 @@ void loop() {
                 Serial.printf("[MAIN] R ignored during prep — %ds remaining (unlocks at %ds)\n",
                               rem, (int)PREP_UNLOCK_S);
             }
-            // Fallback: prep hit 0 but no START from base (packet loss) — start locally
-            if (rem == 0) {
-                if (g_prepZeroMs == 0) {
-                    g_prepZeroMs = nowP;
-                } else if (nowP - g_prepZeroMs >= PREP_START_GRACE_MS) {
-                    Serial.println("[MAIN] No START after prep end — starting round locally");
-                    g_tones.playWindowOpen();
-                    _startRound(g_earlyFlight, g_earlyFlight);
-                    g_earlyFlight = false;
-                }
+            // L declares the first target during prep. Prep is when the caller
+            // actually has time to think and write the call down; once the window
+            // opens they are working. R stays locked until PREP_UNLOCK_S either
+            // way, so this cannot become an accidental launch. [TF-10]
+            if (btnL && _pokerCanDeclare()) {
+                _openTargetPicker(STATE_PREP);
             }
             break;
         }
@@ -735,6 +851,8 @@ void loop() {
                 // R click: start a new flight (pilot launching)
                 g_ft.reset();
                 g_ft.start();
+                g_flightEndedByExpiry = false;
+                _resolveWindowTarget();   // a called W becomes a number here
                 g_state = STATE_FLIGHT_RUNNING;
             } else if (btnL) {
                 // In Poker, L declares the next target instead of scratching.
@@ -756,6 +874,9 @@ void loop() {
 
         case STATE_FLIGHT_RUNNING:
             if (g_wt.isExpired()) {
+                // Still airborne at the close of the window — that is precisely
+                // what a W call is, so record the fact before judging it.
+                g_flightEndedByExpiry = true;
                 _recordFlight();
                 g_state = STATE_WORKING_TIME_EXPIRED;
                 break;
@@ -783,30 +904,51 @@ void loop() {
             break;
 
         case STATE_TARGET_SET: {
+            // Prep keeps counting behind the picker — see _tickPrepClock().
+            if (_pickingFromPrep()) {
+                _tickPrepClock();
+                if (g_state != STATE_TARGET_SET) break;   // window opened under us
+            }
             const int maxMin = g_wtMinutes > 0 ? g_wtMinutes : 10;
             if (btnL) {
-                // Cycle the minutes: --- -> 0 -> 1 -> ... -> max -> W -> ---
+                // Cycle: --- -> W -> 0 -> 1 -> ... -> max -> ---
                 // W and "---" live in this wrap because there is no L-hold to
                 // spare for either: holding L is an AXP2101 power-off that
                 // software never sees.
-                if (g_pickNone)                    { g_pickNone = false; g_pickMin = 0; g_pickSec = 0; }
-                else if (g_pickWindow)             { g_pickWindow = false; g_pickNone = true; }
-                else if (g_pickMin >= maxMin)      { g_pickWindow = true; }
+                //
+                // ⚠ W is FIRST, one press from opening. Kris: every other call is
+                // a fixed number and loses nothing while you dial it, but W is
+                // "the rest of the window" and is getting shorter the whole time
+                // you spend selecting it — so it is the one call that must be
+                // fast. It is also the natural quick-turn-around call.
+                if (g_pickNone)                    { g_pickNone = false; g_pickWindow = true; }
+                else if (g_pickWindow)             { g_pickWindow = false; g_pickMin = 0; g_pickSec = 0; }
+                else if (g_pickMin >= maxMin)      { g_pickNone = true; }
                 else                               { g_pickMin++; }
             } else if (btnR_veryLong) {
-                if (!g_pickNone && !g_pickWindow) {
-                    // Fine adjust. The rulebook's own example call is 2:38, so a
-                    // 5-second-only picker could not express a legal target — and
-                    // judging strictly against a number the timekeeper cannot
-                    // enter would punish the pilot for our UI.
-                    g_pickSec = (g_pickSec + TARGET_PICK_FINE_S) % 60;
+                // Confirm. This is the 2s hold, NOT the 800ms one, because the
+                // 800ms hold fires while the button is still down and so ended the
+                // screen before any longer gesture could be made — which left the
+                // fine adjust below permanently unreachable. Field-found.
+                _confirmTargetPicker();
+            } else if (btnR_longClick) {
+                // Fine adjust, +1s. The rulebook's own example call is 2:38, so a
+                // 5-second-only picker could not express a legal target — and
+                // judging strictly against a number the timekeeper cannot enter
+                // would punish the pilot for our UI.
+                if (!g_pickWindow) {
+                    g_pickNone = false;    // same escape from "---" as a plain click
+                    g_pickSec  = (g_pickSec + TARGET_PICK_FINE_S) % 60;
                 }
             } else if (btnR) {
-                if (!g_pickNone && !g_pickWindow) {
-                    g_pickSec = (g_pickSec + TARGET_PICK_SEC_STEP) % 60;
+                // ⚠ R must work on "---" or a sub-minute call is unreachable in
+                // practice: the picker opens on "---", and requiring an L press
+                // first meant three R clicks did nothing at all. Field-found —
+                // the timekeeper read it as "you cannot set under a minute".
+                if (!g_pickWindow) {
+                    g_pickNone = false;
+                    g_pickSec  = (g_pickSec + TARGET_PICK_SEC_STEP) % 60;
                 }
-            } else if (btnR_held) {
-                _confirmTargetPicker();
             }
             break;
         }

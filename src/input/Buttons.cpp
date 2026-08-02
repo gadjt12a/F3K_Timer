@@ -114,6 +114,7 @@ void Buttons::update() {
     _holdB  = false;
     _clickB = false;
     _veryLongB = false;
+    _longClickB = false;
 
     bool stableB = _prevB;
     if (rawB != _prevB) {
@@ -140,6 +141,11 @@ void Buttons::update() {
         if (!_holdFiredB) {
             _clickB = true;
             Serial.println("[BTN] B (BOOT) clicked");
+        } else if (!_veryLongFiredB) {
+            // Held past 800ms but released before 2000ms. Classified on release,
+            // because that is the only moment the two are distinguishable.
+            _longClickB = true;
+            Serial.println("[BTN] B (BOOT) long-clicked");
         }
         _pressedBms = 0;
         _holdFiredB = false;
@@ -154,6 +160,7 @@ bool Buttons::btnAHeld()     const { return _holdA; }
 bool Buttons::btnBHeld()     const { return _holdB; }
 bool Buttons::btnAVeryLong() const { return _veryLongA; }
 bool Buttons::btnBVeryLong() const { return _veryLongB; }
+bool Buttons::btnBLongClicked() const { return _longClickB; }
 
 int Buttons::getBatteryPercent() {
 #ifdef WAVESHARE_HW
