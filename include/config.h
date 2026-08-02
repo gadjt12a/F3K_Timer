@@ -48,7 +48,15 @@ static const int ALERT_COUNT   = 14;
 #define SCREEN_SLEEP_MS        120000  // 2 minutes
 
 // ── Flight log ────────────────────────────────────────────────────────────────
-#define MAX_FLIGHTS             10
+// 20, not 10. A learner routinely flies 8–10 in a window and the old cap silently
+// dropped anything past ten: addFlight() returned false, so the flight vanished
+// from the local log AND from the NVS round history. The base station still had it
+// (each flight is sent as it happens), but the timer's own record was short.
+// ⚠ NVS is keyed per flight ("r0f19"), not stored as a fixed blob, so raising this
+// does not invalidate history already written.
+#define MAX_FLIGHTS             20
+// Rows of the flight list that fit on the Time Up screen. L pages through them.
+#define EXPIRED_PAGE_ROWS        8
 
 // ── OTA update status ─────────────────────────────────────────────────────────
 enum OtaStatus : uint8_t {

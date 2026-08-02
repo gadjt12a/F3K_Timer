@@ -20,6 +20,9 @@ class UI {
 public:
     void begin();
 
+    // Which page of the Time Up flight list to draw. Set before render().
+    void setExpiredPage(int page) { _expiredPage = page; }
+
     void render(AppState       state,
                 const WorkingTime& wt,
                 const FlightTimer& ft,
@@ -105,7 +108,7 @@ private:
                   int timerId = -1);
     void _drawHistory(int slot, const HistRound& hist, int totalSlots);
     void _drawPilotSelect(const char* pilotName);
-    void _drawExpired(const FlightLog& log);
+    void _drawExpired(const FlightLog& log, int page = 0);
 
     void _drawSettings(int minutes);
     void _drawSettingsInc(int minutes);
@@ -117,7 +120,8 @@ private:
                         int maxShown = 3);
     void _drawFlightLogExpired(const FlightLog& log,
                                int startY,
-                               int maxShown);
+                               int maxShown,
+                               int page = 0);
     void _drawAltitudeEntry(int altM, int flightNo, int totalFlights);
     // Poker target picker. `mins`/`secs` are the dialled value; `isWindow` and
     // `isNone` select the two non-numeric positions in the minute wrap (W and
@@ -143,6 +147,10 @@ private:
     // log. Built into a buffer because _stateLabel() returns a const char*.
     int         _launchNo = 0;
     mutable char _stateLabelBuf[16] = {0};
+    // Which page of the Time Up flight list is showing. A setter rather than a 25th
+    // positional argument to render(), which is already long enough to misread.
+    int         _expiredPage = 0;
+    int         _prevExpiredPage = -1;
 
     // The middle label. Normally FLYING/JUMPED/WAIT; a target note takes
     // precedence, because "TGT 0:45" or "ACHIEVED" is what the caller needs in

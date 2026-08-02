@@ -29,6 +29,8 @@ static OtaUpdater    g_ota;
 #endif
 
 static int  g_histSlot  = 0;   // which history slot to display (0=most recent)
+static int  g_expiredPage = 0; // Time Up results: which page of flights is showing
+static bool g_otaPushPending = false;  // base pushed an update; waiting on the version check
 static HistRound g_histRound;  // loaded on demand when entering STATE_HISTORY
 
 static unsigned long g_scratchStartMs  = 0;
@@ -123,6 +125,7 @@ static int           _lastCountdownN  = -1;
 static int           g_countdownN     = 0;
 static int           _lastAltitudeM   = -1;
 static int           _lastAltFlightNo = -1;
+static int           _lastExpiredPage = -1;
 static bool          _lastIsF5K       = false;
 static int           _lastTimerId     = -2;  // -2 = "never rendered"
 static int           _lastHistSlot    = -1;
@@ -220,6 +223,7 @@ static bool _needsRender(AppState state, int wtSecs, BaseConnState connState) {
     if (state == STATE_PREP)           return g_prepDispDs != _lastPrepDispDs;
     if (state == STATE_LANDING)        return g_landDispS  != _lastLandDispS;
     if (state == STATE_ALTITUDE_ENTRY) return g_altitudeM != _lastAltitudeM || g_altFlightNo != _lastAltFlightNo;
+    if (state == STATE_WORKING_TIME_EXPIRED) return g_expiredPage != _lastExpiredPage;
     if (state == STATE_TARGET_SET) {
         // The dialled value, and the running flight clock ticking beside it —
         // the flight is usually in the air while this screen is up. Rendered on
@@ -293,6 +297,7 @@ static void _doRender(AppState state, int wtSecs) {
         targetNoteKind = g_targetWindow ? TARGET_NOTE_WINDOW : TARGET_NOTE_ARMED;
     }
 
+    g_ui.setExpiredPage(g_expiredPage);
     g_ui.render(state, g_wt, g_ft, g_log, g_scratchStartMs, g_wtMinutes,
                 battPct, charging, pilot, g_comms.baseConnState(), g_countdownN,
                 g_altitudeM, g_altFlightNo, g_log.count(), g_isF5K,
@@ -308,6 +313,7 @@ static void _doRender(AppState state, int wtSecs) {
     _lastCountdownN  = g_countdownN;
     _lastAltitudeM   = g_altitudeM;
     _lastAltFlightNo = g_altFlightNo;
+    _lastExpiredPage = g_expiredPage;
     _lastIsF5K       = g_isF5K;
     _lastTimerId     = g_comms.getTimerId();
     _lastPrepDispDs  = g_prepDispDs;
@@ -387,6 +393,7 @@ static void _startRound(bool withFlight, bool preserveFlight = false) {
     if (!preserveFlight) g_ft.reset();
     g_altFlightNo = 0;
     g_altitudeM   = 0;
+    g_expiredPage = 0;   // Time Up always opens on the first page of the new round
     // Arm the target for the new round. A ladder starts on rung 1 and the pilot
     // must know it before they throw; Poker starts with nothing declared.
     // ⚠ A timer assigned to a pilot late also starts on rung 1 (Kris) — it falls
@@ -562,6 +569,10 @@ static void _judgeTarget(unsigned long durMs) {
                      ((int)(durMs / 1000UL) >= g_targetS);
     g_targetMsgHit     = hit;
     g_targetMsgUntilMs = millis() + 3000;
+    // Pin the verdict to the flight itself. The 3-second flash is gone long before
+    // Time Up, and on a target task the results screen has to show WHICH launches
+    // stood — a "best times" ranking is meaningless when only achieved calls score.
+    g_log.markTargetLast(g_targetS, hit);
     Serial.printf("[MAIN] Target %ds%s vs flight %.1fs -> %s\n",
                   g_targetS, g_targetWindow ? " (W)" : "",
                   durMs / 1000.0f, hit ? "ACHIEVED" : "MISSED");
@@ -727,6 +738,40 @@ void loop() {
         g_earlyFlight = false;
     }
 
+#ifdef WAVESHARE_HW
+    if (g_comms.hasOtaPush()) {
+        // The base only sends this when it has decided the moment is safe — the
+        // timer is idle, no heat is loaded and no round is running. It is checked
+        // again here anyway: a push that arrives just as a round starts must not
+        // reboot a timer with a glider in the air.
+        if (g_state == STATE_IDLE || g_state == STATE_PILOT_SELECT) {
+            const bool forced = g_comms.otaPushIsForced();
+            Serial.printf("[MAIN] OTA push accepted (force=%d) — updating now\n",
+                          (int)forced);
+            g_state = STATE_OTA_CHECK;   // so the screen shows progress, not a blank idle
+            if (forced) g_ota.forceUpdate();
+            else        g_ota.check();   // startUpdate() follows once AVAILABLE lands
+            g_otaPushPending = !forced;
+        } else {
+            Serial.printf("[MAIN] OTA push REFUSED — state=%d is not idle\n", (int)g_state);
+        }
+    }
+    // A non-forced push has to wait for the version check to say AVAILABLE before
+    // it can flash. Nothing else drives it, because there is no user at the screen.
+    if (g_otaPushPending && g_state == STATE_OTA_CHECK) {
+        const OtaStatus s = g_ota.getStatus();
+        if (s == OTA_AVAILABLE) {
+            g_otaPushPending = false;
+            g_ota.startUpdate();
+        } else if (s == OTA_UP_TO_DATE || s == OTA_FAILED || s == OTA_BASE_OLDER) {
+            // Nothing to do, or nothing we may do. Go back to being a timer.
+            Serial.printf("[MAIN] OTA push ended without flashing (status=%d)\n", (int)s);
+            g_otaPushPending = false;
+            g_state = STATE_IDLE;
+        }
+    }
+#endif
+
     if (g_comms.hasStopCommand()) {
         if (g_state == STATE_WORKING_TIME_RUNNING || g_state == STATE_FLIGHT_RUNNING) {
             if (g_state == STATE_FLIGHT_RUNNING) _recordFlight();
@@ -793,6 +838,23 @@ void loop() {
 
         case STATE_IDLE:
             if (btnR_held) {
+                if (g_comms.isConnected()) {
+                    // ⚠ On the base, the settings chain is CLOSED. Working time and
+                    // discipline both arrive with the next TASK, so changing them
+                    // here is at best pointless and at worst confusing when the
+                    // value silently reverts mid-round. Firmware is base-managed
+                    // too — see the OTAPUSH handler — so the OTA screen has no job.
+                    //
+                    // Round Recall stays reachable, and is the whole reason R-hold
+                    // still does something: it is the timer's own record of what it
+                    // flew, and the moment you most need it is when the base station
+                    // is the thing that has failed.
+                    g_histSlot   = 0;
+                    g_histLastMs = millis();
+                    g_histFromSettings = false;
+                    g_state = STATE_HISTORY;
+                    break;
+                }
                 // R hold: go to settings (check first to avoid triggering on release)
                 g_settingsLastMs = millis();
                 g_state = STATE_SETTINGS;
@@ -1042,10 +1104,16 @@ void loop() {
                     g_state = STATE_IDLE;
                 }
             } else if (btnL) {
-                // L click: browse round history from NVS (start at most recent)
-                g_histSlot  = 0;
-                g_histLastMs = millis();
-                g_state = STATE_HISTORY;
+                // L click: page through the flight list. A learner's window can run
+                // to 20 launches and only 8 fit on the round display, so without
+                // this the rest were simply unreachable — the timekeeper could see
+                // that flights existed and never read their times.
+                //
+                // ⚠ This took L away from STATE_HISTORY, which is unharmed: history
+                // has a second entry point in the settings chain (TASK_SELECT →
+                // HISTORY) and that is now the only one.
+                const int pages = (g_log.count() + EXPIRED_PAGE_ROWS - 1) / EXPIRED_PAGE_ROWS;
+                g_expiredPage = (pages > 0) ? (g_expiredPage + 1) % pages : 0;
             }
             break;
 

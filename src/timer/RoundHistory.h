@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include "config.h"
 
-#define HIST_MAX_FLIGHTS MAX_FLIGHTS   // 10 — same cap as live FlightLog
+#define HIST_MAX_FLIGHTS MAX_FLIGHTS   // 20 — same cap as live FlightLog
 
 struct HistRound {
     bool     valid;

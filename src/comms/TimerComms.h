@@ -27,6 +27,9 @@ public:
     bool hasLandStart();        // base sent LAND t=N — read getLandSeconds() before next call
     bool hasScreenCmd();        // base sent SCREEN t=N — read getScreenSeconds() before next call
     bool hasWtSync();           // base sent WTSYNC t=N — read getWtSyncSeconds() before next call
+    // Base sent OTAPUSH: update now, without asking. Read otaPushIsForced() first.
+    bool hasOtaPush();
+    bool otaPushIsForced() const { return _otaPushForce; }
 
     int  getTaskWtSeconds() const { return _taskWtSeconds; }
     int  getWtSyncSeconds() const { return _wtSyncSeconds; }
@@ -104,6 +107,8 @@ private:
     bool _hasLandStart    = false;
     bool _hasScreenCmd    = false;
     bool _hasWtSync       = false;
+    bool _hasOtaPush      = false;
+    bool _otaPushForce    = false;
     int  _wtSyncSeconds   = 0;
     TargetMode _targetMode = TARGET_PLAIN;
     int  _ladderStartS    = 30;
@@ -146,11 +151,13 @@ private:
     //
     // A plain array rather than the previous ring: ACKs let entries leave from
     // the middle, which a head/tail ring cannot express.
-    // 32, not 16: an end-of-round resendRound() can queue up to MAX_FLIGHTS
-    // flights plus the same number of altitudes (20 on a full F5K round) in one
+    // 64, not 32: an end-of-round resendRound() can queue up to MAX_FLIGHTS
+    // flights plus the same number of altitudes (40 on a full F5K round) in one
     // go, on top of whatever normal traffic is still unACKed. Overflowing drops
     // messages — the exact loss the resend exists to prevent.
-    static const int PENDING_MAX  = 32;
+    // ⚠ Sized off MAX_FLIGHTS, which went 10 → 20 when a learner's round turned out
+    // to run to 8–10 launches routinely and 20 was the honest ceiling.
+    static const int PENDING_MAX  = 64;
     static const int PENDING_LINE = 64;
     struct PendingMsg {
         char          line[PENDING_LINE];

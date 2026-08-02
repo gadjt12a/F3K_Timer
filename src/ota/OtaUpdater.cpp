@@ -90,6 +90,15 @@ void OtaUpdater::startUpdate() {
     xTaskCreate(_updateTask, "OTA_UPD", 8192, this, 5, nullptr);
 }
 
+void OtaUpdater::forceUpdate() {
+    // No status gate except "not already downloading" — the base has decided.
+    if ((OtaStatus)_status == OTA_DOWNLOADING) return;
+    Serial.println("[OTA] Forced update by base station push");
+    _status   = (uint8_t)OTA_DOWNLOADING;
+    _progress = 0;
+    xTaskCreate(_updateTask, "OTA_UPD", 8192, this, 5, nullptr);
+}
+
 void OtaUpdater::_checkTask(void* pv) {
     OtaUpdater* self = (OtaUpdater*)pv;
 

@@ -176,6 +176,7 @@ bool TimerComms::hasPrepStart()     { bool v = _hasPrepStart;     _hasPrepStart 
 bool TimerComms::hasLandStart()     { bool v = _hasLandStart;     _hasLandStart     = false; return v; }
 bool TimerComms::hasScreenCmd()     { bool v = _hasScreenCmd;     _hasScreenCmd     = false; return v; }
 bool TimerComms::hasWtSync()        { bool v = _hasWtSync;        _hasWtSync        = false; return v; }
+bool TimerComms::hasOtaPush()       { bool v = _hasOtaPush;       _hasOtaPush       = false; return v; }
 
 void TimerComms::sendFlight(int pilotId, unsigned long durationMs,
                             int targetS, bool window) {
@@ -380,6 +381,15 @@ void TimerComms::_parseLine(const char* line) {
         _wtSyncSeconds = atoi(line + 9);
         _hasWtSync     = true;
         Serial.printf("[COMMS] Working time sync: %ds remaining\n", _wtSyncSeconds);
+
+    } else if (strncmp(line, "OTAPUSH", 7) == 0) {
+        // Firmware is base-managed: the base decides when a timer updates, and the
+        // timer no longer offers an OTA screen while it is connected. `force=1`
+        // means the CD has explicitly confirmed a DOWNGRADE, which is the only way
+        // past the timer's own refusal to flash backwards. [I-41]
+        _otaPushForce = (strstr(line, "force=1") != nullptr);
+        _hasOtaPush   = true;
+        Serial.printf("[COMMS] OTA push from base (force=%d)\n", (int)_otaPushForce);
 
     } else if (strcmp(line, "START") == 0) {
         _hasStartCommand = true;

@@ -570,7 +570,13 @@ void UI::render(AppState       state,
         }
 
         case STATE_WORKING_TIME_EXPIRED:
-            if (screenChanged) _drawExpired(log);
+            // Repaint on a page change too, not only on arrival — the list is the
+            // whole screen, so a stale page is the same defect as a stale screen.
+            if (screenChanged || _expiredPage != _prevExpiredPage) {
+                if (!screenChanged) _clearScreen();
+                _drawExpired(log, _expiredPage);
+                _prevExpiredPage = _expiredPage;
+            }
             break;
 
         case STATE_SETTINGS:
@@ -907,18 +913,34 @@ void UI::_updateFlightStateOnly(bool flightActive, const FlightTimer& ft, const 
 
 // ── Expired ───────────────────────────────────────────────────────────────────
 
-void UI::_drawExpired(const FlightLog& log) {
+void UI::_drawExpired(const FlightLog& log, int page) {
+    // "9-16 of 20" — without it, a paged list is indistinguishable from a short
+    // round, and the timekeeper has no way to know there is more to see.
+    const int total = log.count();
+    const int pages = (total + EXPIRED_PAGE_ROWS - 1) / EXPIRED_PAGE_ROWS;
+    char range[24] = "";
+    if (pages > 1) {
+        const int first = page * EXPIRED_PAGE_ROWS + 1;
+        int last = first + EXPIRED_PAGE_ROWS - 1;
+        if (last > total) last = total;
+        snprintf(range, sizeof(range), "%d-%d of %d", first, last, total);
+    }
+
 #ifdef WOKWI_SIM
     _drawCentered("TIME UP", DISPLAY_CX, 95, COL_RED, 3);
-    _tft.drawFastHLine(DISPLAY_CX - DIV_HALF, 115, DIV_HALF * 2, COL_DIMGRAY);
-    _drawFlightLogExpired(log, 130, 6);
-    _drawCentered("A = RESTART", DISPLAY_CX, 258, COL_GRAY, 1);
+    if (range[0]) _drawCentered(range, DISPLAY_CX, 113, COL_GRAY, 1);
+    _tft.drawFastHLine(DISPLAY_CX - DIV_HALF, 118, DIV_HALF * 2, COL_DIMGRAY);
+    _drawFlightLogExpired(log, 130, EXPIRED_PAGE_ROWS, page);
+    _drawCentered(range[0] ? "A = MORE   B = DONE" : "B = DONE",
+                  DISPLAY_CX, 258, COL_GRAY, 1);
 #else
     // TIME UP on one line at top
     _drawFontCentered("TIME UP", WS_CX, 80, COL_RED, &FreeSansBold18pt7b);
+    if (range[0]) _drawFontCentered(range, WS_CX, 108, COL_GRAY, &FreeSans9pt7b);
     // All flight times below - includes scratched in red with strikethrough
-    _drawFlightLogExpired(log, 130, 8);
-    _drawFontCentered("R = RESTART", WS_CX, 420, COL_GRAY, &FreeSans12pt7b);
+    _drawFlightLogExpired(log, 130, EXPIRED_PAGE_ROWS, page);
+    _drawFontCentered(range[0] ? "L = MORE    R = DONE" : "R = DONE",
+                      WS_CX, 420, COL_GRAY, &FreeSans12pt7b);
 #endif
 }
 
@@ -1290,7 +1312,7 @@ void UI::_drawFlightLog(const FlightLog& log, int startY, int maxShown) {
 
 // Flight log for expired screen - shows ALL flights including scratched ones
 // Top 3 valid flights are marked with asterisk and yellow text
-void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
+void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown, int page) {
 #ifdef WOKWI_SIM
     int step = Y_LOG_STEP;
 #else
@@ -1299,9 +1321,16 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
 
     int total = log.count();
 
+    // ⚠ On a target task (Poker or a Ladder) the "best three times" ranking is
+    // meaningless and actively misleading: only the calls that were ACHIEVED score
+    // anything, and a long flight that missed its call is worth nothing at all. The
+    // traffic light would happily paint that flight gold. So a target round shows
+    // which launches stood instead, and nothing else. Kris asked for exactly this.
+    const bool targetRound = log.hasTargets();
+
     // Find top 3 best (longest) valid flights
     int top3[3] = {-1, -1, -1};
-    for (int pick = 0; pick < 3; pick++) {
+    for (int pick = 0; pick < 3 && !targetRound; pick++) {
         int bestIdx = -1;
         unsigned long bestMs = 0;
         for (int i = 0; i < total; i++) {
@@ -1321,8 +1350,12 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
         top3[pick] = bestIdx;
     }
 
+    // Paging. The ranking above is computed across the WHOLE round, not the page,
+    // so the best flight stays the best flight wherever it happens to be shown.
+    const int first = page * maxShown;
+
     int shown = 0;
-    for (int i = 0; i < total && shown < maxShown; i++) {
+    for (int i = first; i < total && shown < maxShown; i++) {
         Flight f = log.get(i);
         if (f.durationMs == 0) continue;
 
@@ -1337,19 +1370,34 @@ void UI::_drawFlightLogExpired(const FlightLog& log, int startY, int maxShown) {
         int y = startY + shown * step;
         char timeBuf[16]; fmtMs(f.durationMs, timeBuf, sizeof(timeBuf));
         char row[32];
-        snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, (rank >= 0) ? " *" : "");
-
         uint16_t col;
-        if (f.scratched) {
-            col = COL_RED;
-        } else if (rank == 0) {
-            col = COL_GREEN;   // 1st best
-        } else if (rank == 1) {
-            col = COL_ORANGE;  // 2nd best
-        } else if (rank == 2) {
-            col = COL_YELLOW;  // 3rd best
+
+        if (targetRound) {
+            // "3. 0:50.8 >0:50" — the launch number, what was flown, and the call it
+            // was flown against. Green means the call stood and this launch scores;
+            // anything else is a launch spent for nothing, which is the fact the
+            // timekeeper needs at Time Up.
+            char tgtBuf[12] = "";
+            if (f.targetS > 0)
+                snprintf(tgtBuf, sizeof(tgtBuf), " %c%d:%02d", f.achieved ? '>' : '<',
+                         f.targetS / 60, f.targetS % 60);
+            snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, tgtBuf);
+            col = f.scratched ? COL_RED
+                : f.achieved  ? COL_GREEN
+                              : COL_DIMGRAY;
         } else {
-            col = COL_WHITE;
+            snprintf(row, sizeof(row), "%d. %s%s", i + 1, timeBuf, (rank >= 0) ? " *" : "");
+            if (f.scratched) {
+                col = COL_RED;
+            } else if (rank == 0) {
+                col = COL_GREEN;   // 1st best
+            } else if (rank == 1) {
+                col = COL_ORANGE;  // 2nd best
+            } else if (rank == 2) {
+                col = COL_YELLOW;  // 3rd best
+            } else {
+                col = COL_WHITE;
+            }
         }
 
 #ifdef WOKWI_SIM
