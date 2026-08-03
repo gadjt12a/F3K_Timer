@@ -158,8 +158,13 @@ trap - EXIT
 
 # ── Prove it, if this box is a base station ──────────────────────────────────
 echo
-if command -v journalctl >/dev/null 2>&1 \
-   && systemctl list-units --all 2>/dev/null | grep -q f3k-server; then
+# ⚠ `systemctl … | grep -q` looks like the obvious test and is WRONG under
+#   `set -o pipefail`: grep exits the moment it matches, systemctl takes SIGPIPE,
+#   and the pipeline reports failure even though the unit is right there. The
+#   first live run of this script took the "not a base station" branch ON the base
+#   station because of it — a silent skip of the only step that proves anything.
+#   `systemctl cat` answers the same question in one process, no pipe involved.
+if command -v journalctl >/dev/null 2>&1 && systemctl cat f3k-server >/dev/null 2>&1; then
     say "waiting for the timer to rejoin the base (up to 90s)…"
     SINCE=$(date '+%Y-%m-%d %H:%M:%S')
     GOT=""
