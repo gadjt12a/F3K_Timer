@@ -223,6 +223,27 @@ tags `fw-vN`, then prints the push command. Run at the end of each session befor
 > Do not use `-SkipBuild` for real releases — the embedded version string must match the tag
 > or the OTA check will loop.
 
+⚠ **Run it at the end of every session that changed firmware.** fw-v31 through fw-v37 were
+built and flashed by hand over two sessions without packaging any of them, so `releases/`
+sat at fw-v30 while the bench ran fw-v37 — and a tester needing an update had nothing to
+install. The releases folder is the only copy anyone else can get at.
+
+### Flashing a release (Linux)
+
+```bash
+sudo ./firmware/flash-timer.sh fw-v37        # or a directory, or nothing for ./
+```
+
+Handles the three things that make a hand-typed flash fail silently: `--no-stub` (some
+esptool builds ship no ESP32-S3 stub), stopping and restarting `f3k-timer-serial.service`
+if it holds the port, and **clearing `otadata` afterwards** so the timer boots the slot that
+was just written rather than the OTA slot it was running from. On a base station it then
+waits for the timer's `JOIN` line and reports the version it actually booted.
+
+⚠ **This is only needed for a timer the base cannot reach.** Firmware is normally pushed
+automatically. A build older than fw-v37 predates `OTAPUSH` and ignores the push, so it
+needs the cable once — and updates over the air from then on.
+
 ### Roll back
 
 To revert the device to a previous build, flash the binaries directly from the release folder:

@@ -1,0 +1,78 @@
+F3K Timer fw-v37
+Date: 2026-08-03
+Source commit: 03473a3
+
+Covers fw-v31 through fw-v37 — the last packaged release was fw-v30, so this one
+carries seven builds' worth of change. Sessions 66 and 67.
+
+FLASHING
+========
+
+From Linux, use the script that ships beside this directory — it handles the OTA
+slot trap, the missing stub flasher, and the serial logger holding the port:
+
+  sudo ../../flash-timer.sh fw-v37
+
+Or by hand:
+
+  0x00000  bootloader.bin
+  0x08000  partitions.bin
+  0x10000  firmware.bin
+
+  esptool --chip esp32s3 --port /dev/ttyACM0 --no-stub \
+      write_flash 0x0 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+
+⚠ THEN CLEAR otadata, or the timer may boot the firmware you just replaced:
+
+  head -c 8192 /dev/zero | tr '\0' '\377' > blank.bin
+  esptool --chip esp32s3 --port /dev/ttyACM0 --no-stub write_flash 0xe000 blank.bin
+
+  A timer that has taken an over-the-air update is running from ota_1, so a wired
+  write to 0x10000 fills the slot that is NOT running. esptool reports "Hash of
+  data verified", the timer reboots, and comes up on the OLD build. This has cost
+  time in three separate sessions. Never trust the flash succeeding — confirm the
+  version on the timer's screen or from its JOIN line at the base.
+
+BASE STATION PAIRING
+====================
+
+⚠ REQUIRES a base station from 2026-08-02 or later (commit bf976c0 or newer).
+This is a hard pairing, not a nice-to-have:
+
+  - The timer expects `TASK … task= mode=` to know it is flying Poker or a Ladder.
+    An older base sends no mode= and every task runs plain, so no target picker is
+    ever offered and Poker cannot be flown at all.
+  - The timer sends `FLIGHT … target=`. An older base ignores it, and Poker is
+    then scored on the FLOWN time instead of the announced one — wrong scores,
+    silently.
+  - `WTSYNC t=` and `OTAPUSH` are both new. An older base sends neither: a
+    mid-working reconnect gets the wrong clock, and firmware will not push.
+
+WHAT'S NEW SINCE fw-v30
+=======================
+
+Poker and Ladder target tasks, then eleven defects found by pressing the buttons:
+
+  - Poker: declare a target before the launch, immediately after it (F3K.11.5
+    permits this), or during prep. Missed calls stay armed and are re-flown; W
+    gets one attempt only. Scores the ANNOUNCED time, never the flown one.
+  - W resolves at the LAUNCH, not the call. Resolving at the call made a W
+    unflyable unless you threw in the same second — a pilot who flew the whole
+    window scored zero.
+  - Ladders (D, K, M) advance only when the rung is reached; a miss is re-flown
+    against the same time. K and M take an explicit rungs= list.
+  - The flight clock counts DOWN to the target and turns orange past it.
+  - Time Up shows which calls stood, in green, with their launch numbers —
+    a best-times ranking is meaningless when only achieved calls score.
+  - Up to 20 flights (was 10 — past ten they were silently dropped), paged with L.
+  - FLYING (3) — the launch number on the running screen.
+  - Connected to a base, the settings chain is closed: R-hold goes to Round Recall.
+    Working time and discipline belong to the base.
+  - Firmware is base-managed: the base pushes updates to any connected timer on an
+    older build, when no heat is loaded and no round is running.
+  - The screen no longer blanks mid-flight while connected, cable or not.
+  - Jumped starts and scratches both count as a launch and score zero.
+
+⚠ A timer on fw-v36 or older cannot be updated over the air by the base: OTAPUSH
+did not exist before fw-v37, so it ignores the push. Those need this cable flash
+once, and will auto-update from then on.
